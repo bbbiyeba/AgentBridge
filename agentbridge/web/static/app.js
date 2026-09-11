@@ -38,11 +38,54 @@ const THINKING_LINES = [
 
 taglineEl.textContent = TAGLINES[Math.floor(Math.random() * TAGLINES.length)];
 
-document.querySelectorAll(".agent-btn[data-provider]").forEach((btn) => {
-  const emoji = PROVIDER_EMOJI[btn.dataset.provider];
-  const slot = btn.querySelector(".agent-emoji");
+document.querySelectorAll("[data-provider]").forEach((el) => {
+  const emoji = PROVIDER_EMOJI[el.dataset.provider];
+  const slot = el.querySelector(".agent-emoji");
   if (emoji && slot && !slot.textContent) slot.textContent = emoji;
 });
+
+const KEYS_STORAGE_KEY = "agentbridge:keys";
+
+function loadStoredKeys() {
+  try {
+    return JSON.parse(localStorage.getItem(KEYS_STORAGE_KEY) || "{}");
+  } catch (e) {
+    return {};
+  }
+}
+
+function saveStoredKeys(keys) {
+  try {
+    localStorage.setItem(KEYS_STORAGE_KEY, JSON.stringify(keys));
+  } catch (e) {
+    // localStorage unavailable (private mode, etc.) - keys just won't persist across reloads
+  }
+}
+
+const keyAnthropic = document.getElementById("key-anthropic");
+const keyOpenai = document.getElementById("key-openai");
+const saveKeysBtn = document.getElementById("save-keys");
+const keysSavedNote = document.getElementById("keys-saved");
+
+if (keyAnthropic && keyOpenai) {
+  const stored = loadStoredKeys();
+  keyAnthropic.value = stored.anthropic || "";
+  keyOpenai.value = stored.openai || "";
+
+  saveKeysBtn.addEventListener("click", () => {
+    saveStoredKeys({ anthropic: keyAnthropic.value.trim(), openai: keyOpenai.value.trim() });
+    keysSavedNote.textContent = "saved in this browser only.";
+    keysSavedNote.classList.add("show");
+    setTimeout(() => keysSavedNote.classList.remove("show"), 1800);
+  });
+}
+
+function currentCredentials() {
+  if (keyAnthropic && keyOpenai) {
+    return { anthropic: keyAnthropic.value.trim(), openai: keyOpenai.value.trim() };
+  }
+  return {};
+}
 
 function escapeHtml(s) {
   return s
@@ -164,7 +207,7 @@ document.querySelectorAll(".agent-btn").forEach((btn) => {
       const res = await fetch("/api/turn", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ agent }),
+        body: JSON.stringify({ agent, keys: currentCredentials() }),
       });
       const data = await res.json();
       clearInterval(rotator);

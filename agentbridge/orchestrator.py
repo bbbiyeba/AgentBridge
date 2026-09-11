@@ -11,6 +11,12 @@ from .providers import chat
 
 FENCE_RE = re.compile(r"```(?:json)?\s*(\{.*\})\s*```", re.DOTALL)
 
+# Providers that use a secret API key (as opposed to ollama's plain host URL).
+# When settings.require_client_keys is on, turns for these providers must
+# come with a caller-supplied credential and never fall back to the
+# server's own environment variable.
+KEYED_PROVIDERS = {"anthropic", "openai"}
+
 RESPONSE_CONTRACT = """
 Respond with a single JSON object and nothing else (no prose outside it), matching:
 {
@@ -95,9 +101,21 @@ class Orchestrator:
             raise ValueError(f"Path escapes the workspace root: {rel_path}")
         return target
 
-    def take_turn(self, agent_name: str | None = None) -> dict:
+    def take_turn(self, agent_name: str | None = None, credentials: dict[str, str] | None = None) -> dict:
+        credentials = credentials or {}
         name = agent_name or self.mailboard.next_agent or self.config.agents[0].name
         agent = self.config.get_agent(name)
+
+        credential = credentials.get(agent.provider)
+        if (
+            self.config.settings.require_client_keys
+            and agent.provider in KEYED_PROVIDERS
+            and not credential
+        ):
+            raise ValueError(
+                f"This deployment requires your own {agent.provider} API key — "
+                f"add it above before running '{agent.name}'."
+            )
 
         task = self.mailboard.task
         ledger_context = build_ledger_context(
@@ -112,7 +130,13 @@ class Orchestrator:
             f"CURRENT WORKSPACE FILE TREE ({self.workspace}/):\n{file_tree}\n"
         )
 
-        raw = chat(agent.provider, agent.model, system, [{"role": "user", "content": user_prompt}])
+        raw = chat(
+            agent.provider,
+            agent.model,
+            system,
+            [{"role": "user", "content": user_prompt}],
+            credential=credential,
+        )
         parsed = parse_response(raw)
 
         applied = []

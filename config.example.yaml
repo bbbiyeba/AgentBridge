@@ -33,3 +33,13 @@ settings:
   mailboard_file: mailboard.json
   max_ledger_context: 6
   max_turns: 20
+
+  # If you're only running this locally for yourself, leave this false and
+  # set ANTHROPIC_API_KEY / OPENAI_API_KEY as env vars as usual.
+  #
+  # If you're hosting this somewhere other people can reach, set this to
+  # true: the web UI will then require each visitor to paste in their own
+  # Anthropic/OpenAI key before they can run a turn on that provider, and
+  # the server will NEVER fall back to its own env vars for those requests
+  # — so nobody can spend your API credits just by finding the URL.
+  require_client_keys: false

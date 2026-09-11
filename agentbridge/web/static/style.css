@@ -113,6 +113,37 @@ button:disabled { opacity: 0.45; cursor: default; }
 }
 .inline-note.show { opacity: 1; }
 
+.panel-note { color: var(--muted); font-size: 12px; margin-top: 0; }
+
+.key-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.key-row label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 190px;
+  flex-shrink: 0;
+  font-size: 13px;
+  color: var(--text);
+}
+.key-row input {
+  flex: 1;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 7px 9px;
+  font-family: inherit;
+  font-size: 13px;
+}
+.key-row input:focus { outline: none; border-color: var(--agent-color, var(--accent)); }
+.key-row[data-provider="anthropic"] { --agent-color: var(--anthropic); }
+.key-row[data-provider="openai"] { --agent-color: var(--openai); }
+
 .agent-btn {
   background: var(--panel);
   color: var(--text);

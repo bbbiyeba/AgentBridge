@@ -72,6 +72,40 @@ Omit `--agent` to start from the mailboard's `next_agent` (or the first
 configured agent on a fresh run). The loop stops early if an agent sets
 `handoff` to `null`.
 
+## Hosting this somewhere other than localhost
+
+The web UI runs fine on your own machine as-is, but if you deploy it
+somewhere reachable by other people, add auth in front of it (this app has
+none) and think about API keys: by default every turn uses whatever key is
+set as an env var on the server — meaning any visitor who finds the URL
+could trigger turns on your dime.
+
+To stop that, set `require_client_keys: true` in `config.yaml`. When it's
+on:
+
+- the web UI shows a "Your API keys" panel where each visitor pastes in
+  their own Anthropic/OpenAI key
+- keys are kept in that browser's `localStorage` only, sent to the server
+  with each turn request, and never logged, stored in the mailboard, or
+  written to disk
+- the server **never** falls back to its own env-var keys for those
+  requests — a turn on `anthropic` or `openai` is refused outright if the
+  visitor hasn't supplied a key, so nobody can spend your credits just by
+  finding the URL
+
+This only applies to keyed providers (Anthropic, OpenAI). Ollama has no
+secret key — the server still needs Ollama itself reachable, which
+generally means running it on the same host.
+
+The CLI (`agentbridge run`) always keeps using your local env vars
+regardless of this setting — it's meant for you, running trusted, not for
+public visitors.
+
+Because this is a stateful app (it reads and writes `workspace/` and
+`mailboard.json` on disk), it needs a host with a persistent filesystem and
+a long-running process — a small VPS, Render, Railway, or Fly.io, not a
+serverless platform like Vercel.
+
 ## The agent response contract
 
 Every turn, the orchestrator asks the agent to respond with exactly one JSON

@@ -6,10 +6,10 @@ API_URL = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_VERSION = "2023-06-01"
 
 
-def chat(model: str, system: str, messages: list[dict]) -> str:
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
+def chat(model: str, system: str, messages: list[dict], credential: str | None = None) -> str:
+    api_key = credential or os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
-        raise ProviderError("ANTHROPIC_API_KEY is not set")
+        raise ProviderError("No Anthropic API key available (ANTHROPIC_API_KEY not set, and none supplied)")
 
     body = {
         "model": model,

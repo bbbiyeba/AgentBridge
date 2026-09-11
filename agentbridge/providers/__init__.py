@@ -15,14 +15,22 @@ _PROVIDERS = {
 }
 
 
-def chat(provider: str, model: str, system: str, messages: list[dict]) -> str:
+def chat(
+    provider: str,
+    model: str,
+    system: str,
+    messages: list[dict],
+    credential: str | None = None,
+) -> str:
+    """credential overrides the provider's env-var default: an API key for
+    anthropic/openai, or a host URL for ollama. Pass None to use the env var."""
     try:
         module = _PROVIDERS[provider]
     except KeyError:
         raise ValueError(
             f"Unknown provider '{provider}'. Available: {', '.join(_PROVIDERS)}"
         ) from None
-    return module.chat(model, system, messages)
+    return module.chat(model, system, messages, credential=credential)
 
 
 __all__ = ["chat", "ProviderError"]

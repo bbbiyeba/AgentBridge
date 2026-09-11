@@ -16,6 +16,7 @@ def create_app(config: Config) -> Flask:
         return render_template(
             "index.html",
             agents=[{"name": a.name, "provider": a.provider, "model": a.model} for a in config.agents],
+            require_client_keys=config.settings.require_client_keys,
         )
 
     @app.get("/api/state")
@@ -25,6 +26,7 @@ def create_app(config: Config) -> Flask:
             {"name": a.name, "provider": a.provider, "model": a.model} for a in config.agents
         ]
         data["file_tree"] = build_file_tree(orchestrator.workspace)
+        data["require_client_keys"] = config.settings.require_client_keys
         return jsonify(data)
 
     @app.post("/api/task")
@@ -37,8 +39,11 @@ def create_app(config: Config) -> Flask:
     def take_turn():
         body = request.get_json(silent=True) or {}
         agent = body.get("agent") or None
+        # Credentials are used only for this single call and are never
+        # written to the mailboard, logged, or persisted server-side.
+        credentials = body.get("keys") or {}
         try:
-            entry = orchestrator.take_turn(agent)
+            entry = orchestrator.take_turn(agent, credentials=credentials)
         except (ProviderError, ValueError, KeyError) as e:
             return jsonify({"ok": False, "error": str(e)}), 400
         return jsonify({"ok": True, "entry": entry})

@@ -22,6 +22,27 @@
       <span id="task-saved" class="inline-note"></span>
     </section>
 
+    {% if require_client_keys %}
+    <section id="keys-panel">
+      <h2>Your API keys</h2>
+      <p class="panel-note">
+        This deployment doesn't use its own API keys for you. Paste yours in below —
+        they're saved only in your browser (localStorage) and sent straight to this
+        app's own server for a single turn, never logged or written to disk.
+      </p>
+      <div class="key-row" data-provider="anthropic">
+        <label for="key-anthropic"><span class="agent-emoji"></span> Anthropic API key</label>
+        <input id="key-anthropic" type="password" autocomplete="off" placeholder="sk-ant-..." />
+      </div>
+      <div class="key-row" data-provider="openai">
+        <label for="key-openai"><span class="agent-emoji"></span> OpenAI API key</label>
+        <input id="key-openai" type="password" autocomplete="off" placeholder="sk-..." />
+      </div>
+      <button id="save-keys">Save keys</button>
+      <span id="keys-saved" class="inline-note"></span>
+    </section>
+    {% endif %}
+
     <section id="controls-panel">
       <h2>Take a turn</h2>
       <div id="agent-buttons">

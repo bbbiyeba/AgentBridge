@@ -18,6 +18,7 @@ class Settings:
     mailboard_file: Path
     max_ledger_context: int
     max_turns: int
+    require_client_keys: bool
 
 
 @dataclass
@@ -55,5 +56,6 @@ def load_config(path: str | Path = "config.yaml") -> Config:
         mailboard_file=Path(settings_raw.get("mailboard_file", "mailboard.json")),
         max_ledger_context=int(settings_raw.get("max_ledger_context", 6)),
         max_turns=int(settings_raw.get("max_turns", 20)),
+        require_client_keys=bool(settings_raw.get("require_client_keys", False)),
     )
     return Config(agents=agents, settings=settings)
