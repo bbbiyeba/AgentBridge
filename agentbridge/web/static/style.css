@@ -115,6 +115,7 @@ button:disabled { opacity: 0.45; cursor: default; }
 
 .panel-note { color: var(--muted); font-size: 12px; margin-top: 0; }
 
+.auth-row[hidden] { display: none; }
 .auth-row {
   display: flex;
   align-items: center;
