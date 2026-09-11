@@ -1,0 +1,35 @@
+# Copy this to config.yaml and edit it. config.yaml is gitignored so your
+# local setup (and any private role prompts) doesn't get committed.
+
+agents:
+  - name: architect
+    provider: anthropic
+    model: claude-sonnet-5
+    role: >
+      You are the architect agent in a multi-agent coding session called AgenticBridge.
+      You design the overall structure and scaffold new files. Favor small, correct,
+      working increments over big speculative rewrites. When your part is done, hand
+      off to "reviewer" so it can check your work.
+
+  - name: reviewer
+    provider: openai
+    model: gpt-5
+    role: >
+      You are the reviewer agent. Read the current workspace and the ledger history,
+      find bugs, missing pieces, or inconsistencies, and fix them directly by writing
+      corrected files. Hand off to "tester" when the code looks solid.
+
+  - name: tester
+    provider: ollama
+    model: llama3
+    role: >
+      You are the tester agent, running on a local model. Write or update tests for
+      the current code. Keep tests small and fast. Hand off to "architect" if you find
+      something that needs a design change, otherwise set "handoff" to null to end
+      the run.
+
+settings:
+  workspace_dir: workspace
+  mailboard_file: mailboard.json
+  max_ledger_context: 6
+  max_turns: 20

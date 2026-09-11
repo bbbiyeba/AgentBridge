@@ -1,0 +1,119 @@
+# AgenticBridge
+
+A local multi-agent orchestration tool. Multiple AI agents — Claude, ChatGPT,
+and local Ollama models — take turns working on a shared codebase without you
+copy-pasting between them.
+
+## How it works
+
+- **Shared workspace.** `workspace/` holds the code the agents are actually
+  writing. `mailboard.json` is the ledger they coordinate through: each turn,
+  an agent reads the task + recent ledger entries + the workspace file tree,
+  writes files, and appends a ledger entry (with a diff per file and an
+  optional handoff to a named agent). The next turn picks up from there.
+- **Provider-agnostic.** `agenticbridge/providers/chat(provider, model, system,
+  messages)` is the one interface every agent goes through. Claude, OpenAI,
+  and Ollama are swappable per-agent via `config.yaml` — no SDKs, just
+  `urllib` against each provider's HTTP API.
+- **Turn loop.** `agenticbridge/orchestrator.py` builds the prompt, calls the
+  agent, parses its JSON response (`message`, `files`, `handoff`), applies the
+  file writes inside `workspace/`, and appends the ledger entry.
+- **Web UI.** A local Flask app polls the ledger, shows per-file diffs, lets
+  you edit the task, and trigger a turn for any configured agent (or "next in
+  queue" to follow the last agent's handoff).
+
+## Setup
+
+```bash
+python -m venv .venv
+.venv\Scripts\activate          # Windows
+# source .venv/bin/activate     # macOS/Linux
+
+pip install -r requirements.txt
+copy config.example.yaml config.yaml   # Windows
+# cp config.example.yaml config.yaml   # macOS/Linux
+```
+
+Edit `config.yaml` to define your agents — each needs a `name`, `provider`
+(`anthropic` | `openai` | `ollama`), `model`, and `role` (its system prompt).
+
+Set whichever provider API keys you're actually using as environment
+variables (PowerShell shown; only set the ones you need):
+
+```powershell
+$env:ANTHROPIC_API_KEY = "sk-ant-..."
+$env:OPENAI_API_KEY = "sk-..."
+$env:OLLAMA_HOST = "http://localhost:11434"   # optional, this is the default
+```
+
+Ollama itself needs to be running locally (`ollama serve`) with the model
+you referenced in `config.yaml` pulled (`ollama pull llama3`).
+
+## Run
+
+**Web UI** (recommended — lets you watch the ledger live and trigger turns):
+
+```bash
+python -m agenticbridge web
+```
+
+Then open http://127.0.0.1:5050. Set a task, click an agent to give it a
+turn (or "Next in queue" to follow the previous agent's handoff), and watch
+the ledger and file diffs update.
+
+**Terminal**, for a scripted run:
+
+```bash
+python -m agenticbridge run --task "Build a CLI todo app in Python with tests" --turns 6
+```
+
+Omit `--task` to reuse whatever task is already saved in `mailboard.json`.
+Omit `--agent` to start from the mailboard's `next_agent` (or the first
+configured agent on a fresh run). The loop stops early if an agent sets
+`handoff` to `null`.
+
+## The agent response contract
+
+Every turn, the orchestrator asks the agent to respond with exactly one JSON
+object:
+
+```json
+{
+  "message": "short summary of what was done, for the ledger",
+  "files": [{"path": "app.py", "content": "<full new file contents>"}],
+  "handoff": "reviewer"
+}
+```
+
+Agents must return the **full** contents of any file they touch (not a
+diff) — the orchestrator computes and stores the diff itself for the ledger
+and the web UI's file viewer. `handoff` names the next agent to act, or
+`null` to end an automatic `run`.
+
+## Project layout
+
+```
+agenticbridge/
+  providers/        Anthropic / OpenAI / Ollama HTTP clients + the chat() dispatcher
+  web/               Flask app + the single-page UI (templates/static)
+  config.py          Loads config.yaml into AgentConfig/Settings
+  mailboard.py       mailboard.json ledger read/write
+  orchestrator.py    The turn loop: prompt building, response parsing, applying writes
+  __main__.py        CLI: `agenticbridge run` / `agenticbridge web`
+workspace/           The shared codebase agents read and write (gitignored)
+mailboard.json       The ledger (generated at runtime, gitignored)
+config.example.yaml  Template — copy to config.yaml (gitignored) and edit
+```
+
+## Notes and limitations
+
+- Single-process, no locking: this is built for one person driving turns
+  from the web UI or CLI, not concurrent orchestrators writing the same
+  mailboard.
+- The response contract is enforced by prompting, not a schema validator —
+  if a model wraps its JSON in extra prose beyond a single fenced code
+  block, parsing will fail and the turn errors out instead of silently
+  guessing.
+- No sandboxing of file writes beyond staying inside `workspace/`. Don't
+  point an agent at a task that requires running arbitrary shell commands —
+  this tool only ever writes files it's told to write.
