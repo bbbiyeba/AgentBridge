@@ -41,7 +41,14 @@ def create_app(config: Config) -> Flask:
         agent = body.get("agent") or None
         # Credentials are used only for this single call and are never
         # written to the mailboard, logged, or persisted server-side.
-        credentials = body.get("keys") or {}
+        # Headers take precedence so a terminal/curl caller can supply a key
+        # without it ever touching the browser UI or localStorage:
+        #   curl -X POST .../api/turn -H "X-Anthropic-Key: $ANTHROPIC_API_KEY" -d '{"agent":"architect"}'
+        credentials = dict(body.get("keys") or {})
+        if request.headers.get("X-Anthropic-Key"):
+            credentials["anthropic"] = request.headers["X-Anthropic-Key"]
+        if request.headers.get("X-Openai-Key"):
+            credentials["openai"] = request.headers["X-Openai-Key"]
         try:
             entry = orchestrator.take_turn(agent, credentials=credentials)
         except (ProviderError, ValueError, KeyError) as e:

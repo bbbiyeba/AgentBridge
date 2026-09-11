@@ -97,6 +97,33 @@ This only applies to keyed providers (Anthropic, OpenAI). Ollama has no
 secret key — the server still needs Ollama itself reachable, which
 generally means running it on the same host.
 
+**Prefer a terminal over the browser panel?** The browser panel is
+convenient, but the key does sit in that tab's `localStorage` while you're
+using it — exposed to browser extensions, clipboard managers, or an XSS bug
+if one is ever found in this app or a dependency. If you'd rather your key
+never touch a web page at all, send it as a request header instead of
+using the UI:
+
+```bash
+curl -X POST https://your-host/api/turn \
+  -H "content-type: application/json" \
+  -H "X-Anthropic-Key: $ANTHROPIC_API_KEY" \
+  -d '{"agent": "architect"}'
+```
+
+(`X-Openai-Key` works the same way for an OpenAI-backed agent.) The key
+comes straight from your own shell's environment variable, goes out over
+HTTPS, and is never written to disk, logged, or stored anywhere server-side
+— identical handling to the browser panel, just without ever existing
+inside a browser tab.
+
+One caveat either way: the key still has to reach the server so *it* can
+call Anthropic/OpenAI on your behalf — this app doesn't log or persist it,
+but a truly zero-trust setup (key never leaves your own machine, period)
+would need a different architecture, where your machine makes the provider
+call itself instead of the hosted server. Ask if you want that instead —
+it's a bigger change but doable.
+
 The CLI (`agentbridge run`) always keeps using your local env vars
 regardless of this setting — it's meant for you, running trusted, not for
 public visitors.
