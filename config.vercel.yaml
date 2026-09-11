@@ -1,0 +1,39 @@
+# Config for the Vercel deployment. Committed - no secrets, since
+# require_client_keys means visitors bring their own API key.
+#
+# IMPORTANT CAVEAT: workspace_dir and mailboard_file point into /tmp because
+# that's the only writable path in Vercel's serverless sandbox - the rest of
+# the deployed filesystem is read-only. /tmp is also NOT persistent: it can
+# be wiped between requests whenever Vercel spins up a fresh instance (a
+# cold start, or just horizontal scaling), so the ledger and workspace can
+# silently reset at any time. This works well enough to try the app, but
+# isn't a real persistent deployment - see the PythonAnywhere path in
+# README.md for one that actually keeps your data.
+#
+# No Ollama agent: a hosted server can't reach a local Ollama instance
+# running on someone's own machine.
+
+agents:
+  - name: architect
+    provider: anthropic
+    model: claude-sonnet-5
+    role: >
+      You are the architect agent in a multi-agent coding session called AgentBridge.
+      You design the overall structure and scaffold new files. Favor small, correct,
+      working increments over big speculative rewrites. When your part is done, hand
+      off to "reviewer" so it can check your work.
+
+  - name: reviewer
+    provider: openai
+    model: gpt-5
+    role: >
+      You are the reviewer agent. Read the current workspace and the ledger history,
+      find bugs, missing pieces, or inconsistencies, and fix them directly by writing
+      corrected files. Set "handoff" to null when the code looks solid.
+
+settings:
+  workspace_dir: /tmp/agentbridge-workspace
+  mailboard_file: /tmp/agentbridge-mailboard.json
+  max_ledger_context: 6
+  max_turns: 20
+  require_client_keys: true
