@@ -1,2 +1,13 @@
+[project]
+name = "agentbridge"
+version = "0.1.0"
+requires-python = ">=3.11"
+# Mirrors requirements.txt - kept here too because Vercel's Python build
+# uses uv, which needs dependencies declared in a [project] table.
+dependencies = [
+    "Flask>=3.0",
+    "PyYAML>=6.0",
+]
+
 [tool.vercel]
 entrypoint = "wsgi_vercel:application"
