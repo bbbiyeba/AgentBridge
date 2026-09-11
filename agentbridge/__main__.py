@@ -35,7 +35,7 @@ def cmd_web(args: argparse.Namespace) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(prog="agenticbridge")
+    parser = argparse.ArgumentParser(prog="agentbridge")
     parser.add_argument("--config", default="config.yaml", help="Path to config.yaml")
     sub = parser.add_subparsers(dest="command", required=True)
 

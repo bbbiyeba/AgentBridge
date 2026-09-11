@@ -2,13 +2,16 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>AgenticBridge</title>
+  <title>AgentBridge</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
 </head>
 <body>
   <header>
-    <h1>AgenticBridge</h1>
-    <span id="status-dot" class="dot"></span>
+    <div class="brand">
+      <h1>🌉 AgentBridge</h1>
+      <p id="tagline" class="tagline"></p>
+    </div>
+    <span id="status-dot" class="dot" title="polling /api/state"></span>
   </header>
 
   <main>
@@ -16,17 +19,23 @@
       <h2>Task</h2>
       <textarea id="task-input" rows="3" placeholder="Describe what the agents should build..."></textarea>
       <button id="save-task">Save task</button>
+      <span id="task-saved" class="inline-note"></span>
     </section>
 
     <section id="controls-panel">
       <h2>Take a turn</h2>
       <div id="agent-buttons">
         {% for agent in agents %}
-        <button class="agent-btn" data-agent="{{ agent.name }}">
-          {{ agent.name }} <small>({{ agent.provider }}/{{ agent.model }})</small>
+        <button class="agent-btn" data-agent="{{ agent.name }}" data-provider="{{ agent.provider }}" title="{{ agent.name }} — {{ agent.provider }}/{{ agent.model }}">
+          <span class="agent-emoji"></span>
+          <span class="agent-name">{{ agent.name }}</span>
+          <small>{{ agent.provider }}/{{ agent.model }}</small>
         </button>
         {% endfor %}
-        <button id="auto-btn" class="agent-btn">Next in queue</button>
+        <button id="auto-btn" class="agent-btn" data-provider="auto" title="Follow whoever the last agent handed off to">
+          <span class="agent-emoji">🔁</span>
+          <span class="agent-name">Next in queue</span>
+        </button>
       </div>
       <p id="turn-status"></p>
     </section>

@@ -6,7 +6,7 @@ agents:
     provider: anthropic
     model: claude-sonnet-5
     role: >
-      You are the architect agent in a multi-agent coding session called AgenticBridge.
+      You are the architect agent in a multi-agent coding session called AgentBridge.
       You design the overall structure and scaffold new files. Favor small, correct,
       working increments over big speculative rewrites. When your part is done, hand
       off to "reviewer" so it can check your work.

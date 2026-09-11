@@ -1,4 +1,4 @@
-# AgenticBridge
+# AgentBridge
 
 A local multi-agent orchestration tool. Multiple AI agents — Claude, ChatGPT,
 and local Ollama models (just to name a few) — take turns working on a shared codebase without you
@@ -11,11 +11,11 @@ copy-pasting between them.
   an agent reads the task + recent ledger entries + the workspace file tree,
   writes files, and appends a ledger entry (with a diff per file and an
   optional handoff to a named agent). The next turn picks up from there.
-- **Provider-agnostic.** `agenticbridge/providers/chat(provider, model, system,
+- **Provider-agnostic.** `agentbridge/providers/chat(provider, model, system,
   messages)` is the one interface every agent goes through. Claude, OpenAI,
   and Ollama are swappable per-agent via `config.yaml` — no SDKs, just
   `urllib` against each provider's HTTP API.
-- **Turn loop.** `agenticbridge/orchestrator.py` builds the prompt, calls the
+- **Turn loop.** `agentbridge/orchestrator.py` builds the prompt, calls the
   agent, parses its JSON response (`message`, `files`, `handoff`), applies the
   file writes inside `workspace/`, and appends the ledger entry.
 - **Web UI.** A local Flask app polls the ledger, shows per-file diffs, lets
@@ -54,7 +54,7 @@ you referenced in `config.yaml` pulled (`ollama pull llama3`).
 **Web UI** (recommended — lets you watch the ledger live and trigger turns):
 
 ```bash
-python -m agenticbridge web
+python -m agentbridge web
 ```
 
 Then open http://127.0.0.1:5050. Set a task, click an agent to give it a
@@ -64,7 +64,7 @@ the ledger and file diffs update.
 **Terminal**, for a scripted run:
 
 ```bash
-python -m agenticbridge run --task "Build a CLI todo app in Python with tests" --turns 6
+python -m agentbridge run --task "Build a CLI todo app in Python with tests" --turns 6
 ```
 
 Omit `--task` to reuse whatever task is already saved in `mailboard.json`.
@@ -93,13 +93,13 @@ and the web UI's file viewer. `handoff` names the next agent to act, or
 ## Project layout
 
 ```
-agenticbridge/
+agentbridge/
   providers/        Anthropic / OpenAI / Ollama HTTP clients + the chat() dispatcher
   web/               Flask app + the single-page UI (templates/static)
   config.py          Loads config.yaml into AgentConfig/Settings
   mailboard.py       mailboard.json ledger read/write
   orchestrator.py    The turn loop: prompt building, response parsing, applying writes
-  __main__.py        CLI: `agenticbridge run` / `agenticbridge web`
+  __main__.py        CLI: `agentbridge run` / `agentbridge web`
 workspace/           The shared codebase agents read and write (gitignored)
 mailboard.json       The ledger (generated at runtime, gitignored)
 config.example.yaml  Template — copy to config.yaml (gitignored) and edit
