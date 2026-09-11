@@ -1,7 +1,7 @@
 # AgenticBridge
 
 A local multi-agent orchestration tool. Multiple AI agents — Claude, ChatGPT,
-and local Ollama models — take turns working on a shared codebase without you
+and local Ollama models (just to name a few) — take turns working on a shared codebase without you
 copy-pasting between them.
 
 ## How it works
