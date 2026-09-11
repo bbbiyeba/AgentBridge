@@ -1,0 +1,32 @@
+# Config for a public deployment (see "Deploying to PythonAnywhere" in the
+# README). Unlike config.yaml, this file IS committed — it holds no secrets,
+# since require_client_keys means visitors bring their own API keys.
+#
+# No Ollama agent here: a hosted server can't reach a local Ollama instance
+# running on someone's own machine, so that agent only makes sense for local
+# use (see config.example.yaml).
+
+agents:
+  - name: architect
+    provider: anthropic
+    model: claude-sonnet-5
+    role: >
+      You are the architect agent in a multi-agent coding session called AgentBridge.
+      You design the overall structure and scaffold new files. Favor small, correct,
+      working increments over big speculative rewrites. When your part is done, hand
+      off to "reviewer" so it can check your work.
+
+  - name: reviewer
+    provider: openai
+    model: gpt-5
+    role: >
+      You are the reviewer agent. Read the current workspace and the ledger history,
+      find bugs, missing pieces, or inconsistencies, and fix them directly by writing
+      corrected files. Set "handoff" to null when the code looks solid.
+
+settings:
+  workspace_dir: workspace
+  mailboard_file: mailboard.json
+  max_ledger_context: 6
+  max_turns: 20
+  require_client_keys: true

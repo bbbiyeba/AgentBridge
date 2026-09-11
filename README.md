@@ -154,6 +154,50 @@ The CLI (`agentbridge run`) always keeps using your local env vars
 regardless of this setting — it's meant for you, running trusted, not for
 public visitors.
 
+### Deploying to PythonAnywhere (free tier)
+
+PythonAnywhere's free tier gives you a real public URL
+(`yourname.pythonanywhere.com`) with persistent disk storage — your ledger
+and workspace survive restarts — and its free-tier allowlist already
+includes `api.anthropic.com` and `api.openai.com`, so both keyed providers
+work out of the box. Ollama won't: PythonAnywhere's servers can't reach a
+`localhost` Ollama instance running on your own machine, so drop that
+agent for a hosted deployment (`config.deploy.yaml`, committed in this
+repo, already does — it only has `architect` and `reviewer`, and has
+`require_client_keys: true` set so visitors bring their own key).
+
+1. Sign up free at [pythonanywhere.com](https://www.pythonanywhere.com) — no card required.
+2. Open a **Bash console** from the Dashboard and clone the repo:
+   ```bash
+   git clone https://github.com/bbbiyeba/AgentBridge.git
+   cd AgentBridge
+   python3.10 -m venv .venv
+   .venv/bin/pip install -r requirements.txt
+   ```
+3. Go to the **Web** tab → **Add a new web app** → **Manual configuration** → pick the same Python version as your venv.
+4. On that web app's config page, set:
+   - **Source code**: `/home/yourname/AgentBridge`
+   - **Working directory**: `/home/yourname/AgentBridge`
+   - **Virtualenv**: `/home/yourname/AgentBridge/.venv`
+5. Click the **WSGI configuration file** link (PythonAnywhere generates one per web app) and replace its contents with:
+   ```python
+   import sys
+   path = "/home/yourname/AgentBridge"
+   if path not in sys.path:
+       sys.path.insert(0, path)
+
+   from agentbridge.config import load_config
+   from agentbridge.web.app import create_app
+
+   config = load_config(f"{path}/config.deploy.yaml")
+   application = create_app(config)
+   ```
+   (This is the same logic as [wsgi_pythonanywhere.py](wsgi_pythonanywhere.py) in the repo — PythonAnywhere needs the content pasted into *its* generated file specifically, not a path to ours.)
+6. No API keys need setting on the server at all — `require_client_keys: true` means visitors supply their own via the panel or the `X-Anthropic-Key`/`X-Openai-Key` headers.
+7. Hit the green **Reload** button on the Web tab, then visit `https://yourname.pythonanywhere.com`.
+
+Free-tier web apps go to sleep if untouched for 3 months — the Web tab shows a button to extend that with one click, no action needed otherwise. To ship a code update later: `git pull` in the same Bash console, then hit **Reload** again.
+
 Because this is a stateful app (it reads and writes `workspace/` and
 `mailboard.json` on disk), it needs a host with a persistent filesystem and
 a long-running process — a small VPS, Render, Railway, or Fly.io, not a
