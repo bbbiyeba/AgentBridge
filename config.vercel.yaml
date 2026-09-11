@@ -12,6 +12,12 @@
 #
 # No Ollama agent: a hosted server can't reach a local Ollama instance
 # running on someone's own machine.
+#
+# Saved API keys are the exception to the /tmp caveat above: if you set
+# GOOGLE_CLIENT_ID/SECRET + UPSTASH_REDIS_REST_URL/TOKEN +
+# KEY_ENCRYPTION_SECRET (see README.md), visitors can sign in with Google
+# and their keys persist in Upstash Redis - unaffected by /tmp resetting,
+# since that storage lives outside this deployment entirely.
 
 agents:
   - name: architect

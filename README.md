@@ -200,8 +200,49 @@ Free-tier web apps go to sleep if untouched for 3 months — the Web tab shows a
 
 Because this is a stateful app (it reads and writes `workspace/` and
 `mailboard.json` on disk), it needs a host with a persistent filesystem and
-a long-running process — a small VPS, Render, Railway, or Fly.io, not a
-serverless platform like Vercel.
+a long-running process — a small VPS, Render, Railway, or Fly.io ordinarily,
+not a serverless platform like Vercel (see the caveat in `config.vercel.yaml`
+if you deploy there anyway — the ledger/workspace won't reliably persist,
+though saved API keys will, via the feature below).
+
+### Optional: "Sign in with Google" to save keys across devices
+
+By default, keys entered in the panel live in that one browser's
+`localStorage` — convenient, but they don't follow you to a different
+browser or device. Setting a few extra environment variables turns on
+Google sign-in, after which saved keys are stored server-side (encrypted)
+and tied to your Google account instead, so they follow you anywhere.
+
+This is a bigger commitment than everything else in this README: **your
+server now holds other people's live API keys**, even encrypted, so treat
+`KEY_ENCRYPTION_SECRET` with the same care as an API key itself. If that
+tradeoff isn't worth it, skip this section entirely — plain `localStorage`
+keys (the default) never touch your server's storage at all.
+
+**1. Register a Google OAuth app** (free, needs a Google account, no billing):
+   - Go to [Google Cloud Console](https://console.cloud.google.com/) → create a project (or use an existing one)
+   - **APIs & Services → OAuth consent screen**: set it up as "External," add your own email as a test user if it stays in testing mode
+   - **APIs & Services → Credentials → Create Credentials → OAuth client ID** → Application type: **Web application**
+   - Under **Authorized redirect URIs**, add: `https://<your-deployed-domain>/auth/callback` (must match exactly, including `https://`)
+   - Save, then copy the **Client ID** and **Client secret**
+
+**2. Create a free Upstash Redis database** (this is where encrypted keys are stored):
+   - Sign up free at [upstash.com](https://upstash.com) — no card required
+   - Create a Redis database (any region)
+   - From its dashboard, copy the **REST URL** and **REST Token**
+
+**3. Set these environment variables on your host** (Vercel: Project Settings → Environment Variables; PythonAnywhere: there's an Environment Variables section on the Web tab):
+
+| Variable | Value |
+|---|---|
+| `GOOGLE_CLIENT_ID` | from step 1 |
+| `GOOGLE_CLIENT_SECRET` | from step 1 |
+| `UPSTASH_REDIS_REST_URL` | from step 2 |
+| `UPSTASH_REDIS_REST_TOKEN` | from step 2 |
+| `KEY_ENCRYPTION_SECRET` | any long random string you generate yourself — e.g. `python -c "import secrets; print(secrets.token_hex(32))"` |
+| `FLASK_SECRET_KEY` | another long random string (same command) — signs the login session cookie |
+
+Redeploy after setting these. The "Sign in with Google" link appears automatically once `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` are set — nothing to change in `config.yaml`. Without Upstash configured, saved keys just won't persist even if login works; without Google configured, the whole feature stays hidden and everything behaves exactly as before.
 
 ## The agent response contract
 
@@ -248,3 +289,8 @@ config.example.yaml  Template — copy to config.yaml (gitignored) and edit
 - No sandboxing of file writes beyond staying inside `workspace/`. Don't
   point an agent at a task that requires running arbitrary shell commands —
   this tool only ever writes files it's told to write.
+- Google login only verifies identity via Google's `tokeninfo` endpoint
+  (no JWT library, matching the rest of this app's stdlib-only approach) —
+  fine for this app's purposes (an account handle to key saved API keys
+  to), but don't lean on it as a hardened auth system for anything more
+  sensitive.

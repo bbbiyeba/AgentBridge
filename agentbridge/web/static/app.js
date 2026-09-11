@@ -66,18 +66,75 @@ const keyAnthropic = document.getElementById("key-anthropic");
 const keyOpenai = document.getElementById("key-openai");
 const saveKeysBtn = document.getElementById("save-keys");
 const keysSavedNote = document.getElementById("keys-saved");
+const authRow = document.getElementById("auth-row");
+const authStatus = document.getElementById("auth-status");
+const authLoginLink = document.getElementById("auth-login-link");
+const authLogoutLink = document.getElementById("auth-logout-link");
+
+let isSignedIn = false;
+let keysLoadedFromServer = false;
 
 if (keyAnthropic && keyOpenai) {
   const stored = loadStoredKeys();
   keyAnthropic.value = stored.anthropic || "";
   keyOpenai.value = stored.openai || "";
 
-  saveKeysBtn.addEventListener("click", () => {
-    saveStoredKeys({ anthropic: keyAnthropic.value.trim(), openai: keyOpenai.value.trim() });
-    keysSavedNote.textContent = "saved in this browser only.";
+  saveKeysBtn.addEventListener("click", async () => {
+    const keys = { anthropic: keyAnthropic.value.trim(), openai: keyOpenai.value.trim() };
+    saveStoredKeys(keys);
+    if (isSignedIn) {
+      try {
+        await fetch("/api/keys", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ keys }),
+        });
+        keysSavedNote.textContent = "saved to your account — synced across devices.";
+      } catch (e) {
+        keysSavedNote.textContent = "saved in this browser only (couldn't reach your account).";
+      }
+    } else {
+      keysSavedNote.textContent = "saved in this browser only.";
+    }
     keysSavedNote.classList.add("show");
-    setTimeout(() => keysSavedNote.classList.remove("show"), 1800);
+    setTimeout(() => keysSavedNote.classList.remove("show"), 2200);
   });
+}
+
+async function refreshAuthUI(state) {
+  if (!authRow) return;
+  if (!state.google_login_available) {
+    authRow.hidden = true;
+    return;
+  }
+  authRow.hidden = false;
+
+  if (state.user) {
+    isSignedIn = true;
+    authStatus.textContent = `Signed in as ${state.user.email}.`;
+    authLoginLink.hidden = true;
+    authLogoutLink.hidden = false;
+
+    if (!keysLoadedFromServer && keyAnthropic && keyOpenai) {
+      keysLoadedFromServer = true;
+      try {
+        const res = await fetch("/api/keys");
+        const data = await res.json();
+        if (data.ok) {
+          if (data.keys.anthropic) keyAnthropic.value = data.keys.anthropic;
+          if (data.keys.openai) keyOpenai.value = data.keys.openai;
+        }
+      } catch (e) {
+        // fall back silently to whatever localStorage already populated
+      }
+    }
+  } else {
+    isSignedIn = false;
+    keysLoadedFromServer = false;
+    authStatus.textContent = "";
+    authLoginLink.hidden = false;
+    authLogoutLink.hidden = true;
+  }
 }
 
 function currentCredentials() {
@@ -163,6 +220,7 @@ async function refresh() {
     if (!taskDirty) taskInput.value = state.task || "";
     fileTree.textContent = state.file_tree || "(workspace is an empty canvas, or just empty)";
     renderLedger(state);
+    await refreshAuthUI(state);
   } catch (e) {
     if (!turnInFlight) statusDot.className = "dot err";
   }

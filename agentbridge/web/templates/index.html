@@ -27,9 +27,14 @@
       <h2>Your API keys</h2>
       <p class="panel-note">
         This deployment doesn't use its own API keys for you. Paste yours in below —
-        they're saved only in your browser (localStorage) and sent straight to this
-        app's own server for a single turn, never logged or written to disk.
+        by default they're saved only in your browser (localStorage) and sent straight
+        to this app's own server for a single turn, never logged or written to disk.
       </p>
+      <div id="auth-row" class="auth-row" hidden>
+        <span id="auth-status"></span>
+        <a id="auth-login-link" href="/auth/login">Sign in with Google to save your keys across devices</a>
+        <a id="auth-logout-link" href="/auth/logout" hidden>Sign out</a>
+      </div>
       <div class="key-row" data-provider="anthropic">
         <label for="key-anthropic"><span class="agent-emoji"></span> Anthropic API key</label>
         <input id="key-anthropic" type="password" autocomplete="off" placeholder="sk-ant-..." />
