@@ -101,21 +101,12 @@ class Orchestrator:
             raise ValueError(f"Path escapes the workspace root: {rel_path}")
         return target
 
-    def take_turn(self, agent_name: str | None = None, credentials: dict[str, str] | None = None) -> dict:
-        credentials = credentials or {}
+    def prepare_turn(self, agent_name: str | None = None) -> dict:
+        """Build the prompt for the next turn, without calling any provider or
+        touching the filesystem. Used both by take_turn() and by remote
+        workers that want to make the LLM call themselves."""
         name = agent_name or self.mailboard.next_agent or self.config.agents[0].name
         agent = self.config.get_agent(name)
-
-        credential = credentials.get(agent.provider)
-        if (
-            self.config.settings.require_client_keys
-            and agent.provider in KEYED_PROVIDERS
-            and not credential
-        ):
-            raise ValueError(
-                f"This deployment requires your own {agent.provider} API key — "
-                f"add it above before running '{agent.name}'."
-            )
 
         task = self.mailboard.task
         ledger_context = build_ledger_context(
@@ -129,18 +120,26 @@ class Orchestrator:
             f"RECENT LEDGER ENTRIES:\n{ledger_context}\n\n"
             f"CURRENT WORKSPACE FILE TREE ({self.workspace}/):\n{file_tree}\n"
         )
+        return {
+            "agent": {"name": agent.name, "provider": agent.provider, "model": agent.model},
+            "system": system,
+            "user_prompt": user_prompt,
+        }
 
-        raw = chat(
-            agent.provider,
-            agent.model,
-            system,
-            [{"role": "user", "content": user_prompt}],
-            credential=credential,
-        )
-        parsed = parse_response(raw)
+    def apply_turn(
+        self,
+        agent_name: str,
+        message: str,
+        files: list[dict],
+        handoff: str | None,
+    ) -> dict:
+        """Apply an already-obtained agent response: write files, diff them,
+        and append the ledger entry. Used both by take_turn() and by remote
+        workers submitting a turn they ran locally."""
+        agent = self.config.get_agent(agent_name)
 
         applied = []
-        for f in parsed["files"]:
+        for f in files:
             target = self._resolve_in_workspace(f["path"])
             old_content = target.read_text(encoding="utf-8") if target.exists() else None
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -157,10 +156,37 @@ class Orchestrator:
             agent=agent.name,
             provider=agent.provider,
             model=agent.model,
-            message=parsed["message"],
+            message=message,
             files=applied,
-            handoff=parsed.get("handoff"),
+            handoff=handoff,
         )
+
+    def take_turn(self, agent_name: str | None = None, credentials: dict[str, str] | None = None) -> dict:
+        credentials = credentials or {}
+        prepared = self.prepare_turn(agent_name)
+        agent = prepared["agent"]
+
+        credential = credentials.get(agent["provider"])
+        if (
+            self.config.settings.require_client_keys
+            and agent["provider"] in KEYED_PROVIDERS
+            and not credential
+        ):
+            raise ValueError(
+                f"This deployment requires your own {agent['provider']} API key — "
+                f"add it above before running '{agent['name']}'."
+            )
+
+        raw = chat(
+            agent["provider"],
+            agent["model"],
+            prepared["system"],
+            [{"role": "user", "content": prepared["user_prompt"]}],
+            credential=credential,
+        )
+        parsed = parse_response(raw)
+
+        return self.apply_turn(agent["name"], parsed["message"], parsed["files"], parsed.get("handoff"))
 
     def run(self, max_turns: int | None = None, start_agent: str | None = None) -> list[dict]:
         max_turns = max_turns or self.config.settings.max_turns

@@ -119,10 +119,36 @@ inside a browser tab.
 
 One caveat either way: the key still has to reach the server so *it* can
 call Anthropic/OpenAI on your behalf — this app doesn't log or persist it,
-but a truly zero-trust setup (key never leaves your own machine, period)
-would need a different architecture, where your machine makes the provider
-call itself instead of the hosted server. Ask if you want that instead —
-it's a bigger change but doable.
+but it does transit the network and exist briefly in server memory. For a
+setup where your key **never** leaves your own machine at all, see the
+worker mode below.
+
+### Zero-trust mode: run the agent yourself with `agentbridge worker`
+
+Instead of sending your key to the hosted server at all, you can run a
+turn's provider call on your own machine and only send the (non-secret)
+result up to the shared server. The server exposes two endpoints for this:
+`GET /api/turn/prepare` returns the prompt for a turn (task, ledger, file
+tree — nothing secret), and `POST /api/turn/submit` accepts the finished
+result (message, files, handoff — also nothing secret) and applies it to
+the shared workspace and ledger. Neither endpoint ever sees an API key.
+
+```bash
+$env:ANTHROPIC_API_KEY = "sk-ant-..."   # stays on your machine, never sent to the server
+python -m agentbridge worker --server https://your-host --agent architect
+```
+
+This polls the hosted server and, whenever it's `architect`'s turn, fetches
+the prompt, calls Anthropic **directly from your machine** using your local
+key, and posts just the result back. Add `--once` to run a single turn
+immediately regardless of whose turn it currently is (handy for testing, or
+for scripting a specific agent's turn from your own shell), or
+`--poll-interval 10` to change how often it checks (default: 5 seconds).
+
+Run one worker per agent you want to execute locally — e.g. you run
+`--agent architect` on your machine with your Anthropic key, someone else
+runs `--agent reviewer` on theirs with their OpenAI key, and the handoffs
+between them still flow through the shared server exactly like normal.
 
 The CLI (`agentbridge run`) always keeps using your local env vars
 regardless of this setting — it's meant for you, running trusted, not for

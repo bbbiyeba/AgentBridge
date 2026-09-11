@@ -34,6 +34,24 @@ def cmd_web(args: argparse.Namespace) -> None:
     app.run(host=args.host, port=args.port, debug=args.debug)
 
 
+def cmd_worker(args: argparse.Namespace) -> None:
+    from .worker import WorkerError, run_one_turn, watch
+
+    try:
+        if args.once:
+            entry = run_one_turn(args.server, args.agent)
+            print(f"[{entry['id']}] ran turn: {entry['message']}")
+            for f in entry["files"]:
+                print(f"    {f['action']}: {f['path']}")
+        else:
+            watch(args.server, args.agent, args.poll_interval)
+    except WorkerError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+    except KeyboardInterrupt:
+        print("\nStopped.")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="agentbridge")
     parser.add_argument("--config", default="config.yaml", help="Path to config.yaml")
@@ -52,6 +70,20 @@ def main() -> None:
     web_p.add_argument("--port", type=int, default=5050)
     web_p.add_argument("--debug", action="store_true")
     web_p.set_defaults(func=cmd_web)
+
+    worker_p = sub.add_parser(
+        "worker",
+        help="Run turns for one agent locally, using YOUR local API key — it never touches the hosted server",
+    )
+    worker_p.add_argument("--server", required=True, help="Base URL of the hosted AgentBridge server, e.g. https://your-host")
+    worker_p.add_argument("--agent", required=True, help="Name of the agent (as configured on the server) this worker acts as")
+    worker_p.add_argument("--poll-interval", type=float, default=5.0, help="Seconds between checks for whose turn it is (default: 5)")
+    worker_p.add_argument(
+        "--once",
+        action="store_true",
+        help="Run exactly one turn immediately, regardless of whose turn it currently is, then exit",
+    )
+    worker_p.set_defaults(func=cmd_worker)
 
     args = parser.parse_args()
     args.func(args)
