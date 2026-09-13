@@ -5,6 +5,14 @@
 # Images & Graphics
 # ---------------------------------------------------------------------------
 *.png                filter=lfs diff=lfs merge=lfs -text
+
+# Social-preview image the app serves directly (public/og-image.png) --
+# excluded from LFS: it's small (~70KB), and Vercel's build doesn't resolve
+# LFS pointers, so an LFS-tracked copy gets served as its raw ~130-byte
+# pointer text instead of the actual image (this is why LinkedIn/Post
+# Inspector reported "no image found" even with correct, correctly-ordered
+# og:image tags).
+public/*.png -filter -diff -merge -text
 *.jpg                filter=lfs diff=lfs merge=lfs -text
 *.jpeg               filter=lfs diff=lfs merge=lfs -text
 *.gif                filter=lfs diff=lfs merge=lfs -text
