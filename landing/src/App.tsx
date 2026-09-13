@@ -754,6 +754,17 @@ export default function App() {
                 <span style={{ color: "var(--color-accent)" }}>★</span> github.com/bbbiyeba
               </a>
               <a
+                href="https://www.linkedin.com/in/bryce-biyeba/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 text-sm w-fit"
+                style={{ color: "var(--color-muted)", fontFamily: "var(--font-body)" }}
+                onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.color = "var(--color-text)")}
+                onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.color = "var(--color-muted)")}
+              >
+                <span style={{ color: "var(--color-accent)" }}>in</span> linkedin.com/in/bryce-biyeba
+              </a>
+              <a
                 href="https://github.com/bbbiyeba/AgentBridge/issues"
                 target="_blank"
                 rel="noopener noreferrer"
@@ -782,7 +793,7 @@ export default function App() {
             <span className="text-xs" style={{ fontFamily: "var(--font-body)", color: "var(--color-muted)" }}>
               Built by{" "}
               <a
-                href="https://github.com/bbbiyeba"
+                href="https://www.linkedin.com/in/bryce-biyeba/"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="font-semibold hover:text-white transition-colors"
@@ -796,6 +807,7 @@ export default function App() {
             <a href="https://github.com/bbbiyeba/AgentBridge#readme" target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors">docs</a>
             <a href="https://github.com/bbbiyeba/AgentBridge" target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors">github</a>
             <a href="https://agent-bridge-one.vercel.app/app" target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors">dashboard</a>
+            <a href="https://www.linkedin.com/in/bryce-biyeba/" target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors">linkedin</a>
             <a href="#contact" className="hover:text-white transition-colors">contact</a>
           </div>
         </div>
