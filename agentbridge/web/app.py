@@ -35,7 +35,15 @@ def create_app(config: Config) -> Flask:
             return {}
 
     @app.get("/")
-    def index():
+    def landing():
+        # The marketing site is a separate static build (landing/) deployed
+        # as its own Vercel project. Override with LANDING_URL if that ever
+        # moves; this default is where it lives today.
+        landing_url = os.environ.get("LANDING_URL", "https://agentbridge-landing.vercel.app")
+        return redirect(landing_url)
+
+    @app.get("/app")
+    def dashboard():
         return render_template(
             "index.html",
             agents=[{"name": a.name, "provider": a.provider, "model": a.model} for a in config.agents],
@@ -77,12 +85,12 @@ def create_app(config: Config) -> Flask:
         except google_auth.AuthError as e:
             return jsonify({"ok": False, "error": str(e)}), 400
         session["user"] = identity
-        return redirect(url_for("index"))
+        return redirect(url_for("dashboard"))
 
     @app.get("/auth/logout")
     def auth_logout():
         session.pop("user", None)
-        return redirect(url_for("index"))
+        return redirect(url_for("dashboard"))
 
     @app.get("/api/keys")
     def get_saved_keys():

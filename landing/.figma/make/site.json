@@ -1,0 +1,10 @@
+{
+  "description": "Streamline collaboration among AI agents like Claude and ChatGPT to enhance productivity and efficiency in managing shared codebases.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}

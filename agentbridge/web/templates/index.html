@@ -3,13 +3,19 @@
 <head>
   <meta charset="utf-8" />
   <title>AgentBridge</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
 </head>
 <body>
   <header>
     <div class="brand">
-      <h1>🌉 AgentBridge</h1>
-      <p id="tagline" class="tagline"></p>
+      <span class="logo-mark">🌉</span>
+      <div class="brand-text">
+        <h1><a href="/">AgentBridge</a></h1>
+        <p id="tagline" class="tagline"></p>
+      </div>
     </div>
     <span id="status-dot" class="dot" title="polling /api/state"></span>
   </header>

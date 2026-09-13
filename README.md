@@ -57,9 +57,10 @@ you referenced in `config.yaml` pulled (`ollama pull llama3`).
 python -m agentbridge web
 ```
 
-Then open http://127.0.0.1:5050. Set a task, click an agent to give it a
-turn (or "Next in queue" to follow the previous agent's handoff), and watch
-the ledger and file diffs update.
+Then open http://127.0.0.1:5050/app (the root `/` redirects to the public
+marketing site, which isn't useful for local dev — go straight to `/app`).
+Set a task, click an agent to give it a turn (or "Next in queue" to follow
+the previous agent's handoff), and watch the ledger and file diffs update.
 
 **Terminal**, for a scripted run:
 
@@ -194,7 +195,7 @@ repo, already does — it only has `architect` and `reviewer`, and has
    ```
    (This is the same logic as [wsgi_pythonanywhere.py](wsgi_pythonanywhere.py) in the repo — PythonAnywhere needs the content pasted into *its* generated file specifically, not a path to ours.)
 6. No API keys need setting on the server at all — `require_client_keys: true` means visitors supply their own via the panel or the `X-Anthropic-Key`/`X-Openai-Key` headers.
-7. Hit the green **Reload** button on the Web tab, then visit `https://yourname.pythonanywhere.com`.
+7. Hit the green **Reload** button on the Web tab, then visit `https://yourname.pythonanywhere.com/app` (the dashboard — `/` redirects to the separate marketing site).
 
 Free-tier web apps go to sleep if untouched for 3 months — the Web tab shows a button to extend that with one click, no action needed otherwise. To ship a code update later: `git pull` in the same Bash console, then hit **Reload** again.
 
@@ -267,15 +268,29 @@ and the web UI's file viewer. `handoff` names the next agent to act, or
 ```
 agentbridge/
   providers/        Anthropic / OpenAI / Ollama HTTP clients + the chat() dispatcher
-  web/               Flask app + the single-page UI (templates/static)
+  web/               Flask app + the dashboard UI (templates/static), served at /app
+  worker.py          Local worker: runs a turn's provider call on your own machine
+  auth.py            Optional "Sign in with Google" (see README section below)
+  keystore.py        Optional encrypted per-user key storage (Upstash Redis)
   config.py          Loads config.yaml into AgentConfig/Settings
   mailboard.py       mailboard.json ledger read/write
   orchestrator.py    The turn loop: prompt building, response parsing, applying writes
-  __main__.py        CLI: `agentbridge run` / `agentbridge web`
+  __main__.py        CLI: `agentbridge run` / `agentbridge web` / `agentbridge worker`
+landing/             Marketing site (Vite/React) - a separate deployment, see below
 workspace/           The shared codebase agents read and write (gitignored)
 mailboard.json       The ledger (generated at runtime, gitignored)
 config.example.yaml  Template — copy to config.yaml (gitignored) and edit
+config.deploy.yaml   Committed public-hosting config (used by the PythonAnywhere path)
+config.vercel.yaml   Committed public-hosting config (used by the Vercel path)
 ```
+
+### The `landing/` marketing site
+
+`landing/` is a separate Vite/React app (originally generated in Figma Make)
+deployed as its **own** Vercel project, independent from the Flask app. The
+Flask app's `/` route just redirects there (`/app` is the actual dashboard).
+It has its own `package.json`/`npm install`/`npm run build` — it's not part
+of the Python app at all, just living in the same repo for convenience.
 
 ## Notes and limitations
 

@@ -1,0 +1,51 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap');
+@import 'tailwindcss';
+
+@theme {
+  --font-display: 'DM Sans', sans-serif;
+  --font-body: 'Inter', sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+
+  --color-bg: #0a0a0c;
+  --color-surface: #111116;
+  --color-surface-2: #18181f;
+  --color-border: #2a2a35;
+  --color-border-bright: #3d3d50;
+  --color-text: #e8e8f0;
+  --color-muted: #7070a0;
+  --color-accent: #6c6cff;
+  --color-accent-dim: #6c6cff22;
+  --color-green: #3ddc84;
+  --color-green-dim: #3ddc8418;
+  --color-orange: #ff8c42;
+  --color-orange-dim: #ff8c4218;
+  --color-pink: #ff5c8d;
+  --color-pink-dim: #ff5c8d18;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+}
+
+::-webkit-scrollbar {
+  width: 0px;
+  opacity: 0;
+}
+
+::selection {
+  background: var(--color-accent-dim);
+  color: var(--color-accent);
+}
