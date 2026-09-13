@@ -299,6 +299,53 @@ function ContactForm() {
   );
 }
 
+// Paste your Loom share link here once recorded, e.g.
+// "https://www.loom.com/share/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+const LOOM_SHARE_URL = "";
+
+function loomEmbedUrl(shareUrl: string): string | null {
+  const match = shareUrl.match(/loom\.com\/(?:share|embed)\/([a-zA-Z0-9]+)/);
+  return match ? `https://www.loom.com/embed/${match[1]}` : null;
+}
+
+function DemoVideo() {
+  const embedUrl = LOOM_SHARE_URL ? loomEmbedUrl(LOOM_SHARE_URL) : null;
+
+  if (embedUrl) {
+    return (
+      <div
+        className="rounded-2xl overflow-hidden border w-full"
+        style={{ borderColor: "var(--color-border)", position: "relative", paddingBottom: "62.5%", height: 0 }}
+      >
+        <iframe
+          src={embedUrl}
+          title="AgentBridge demo"
+          allow="autoplay; fullscreen; picture-in-picture"
+          allowFullScreen
+          style={{ position: "absolute", inset: 0, width: "100%", height: "100%", border: "none" }}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className="rounded-2xl border flex flex-col items-center justify-center gap-3 text-center p-10 w-full"
+      style={{ borderColor: "var(--color-border)", background: "var(--color-surface)", aspectRatio: "16/10" }}
+    >
+      <div
+        className="w-14 h-14 rounded-full flex items-center justify-center"
+        style={{ background: "var(--color-accent-dim)", color: "var(--color-accent)", fontSize: 20 }}
+      >
+        ▶
+      </div>
+      <p className="text-sm" style={{ color: "var(--color-muted)", fontFamily: "var(--font-body)" }}>
+        Demo video coming soon
+      </p>
+    </div>
+  );
+}
+
 export default function App() {
   const [activeAgent, setActiveAgent] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -415,7 +462,8 @@ export default function App() {
         />
 
         <div className="relative max-w-6xl mx-auto px-6 md:px-12 pt-24 pb-20 md:pt-36 md:pb-28">
-          <div className="max-w-3xl">
+          <div className="grid lg:grid-cols-2 gap-12 lg:gap-10 items-center">
+          <div>
             <div
               className="inline-flex items-center gap-2 text-xs px-3 py-1.5 rounded-full border mb-8"
               style={{
@@ -484,6 +532,9 @@ export default function App() {
                 Read the docs
               </a>
             </div>
+          </div>
+
+          <DemoVideo />
           </div>
 
           {/* Agent pills row */}
