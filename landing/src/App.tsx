@@ -272,8 +272,8 @@ function ContactForm() {
 
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-3 max-w-md">
-      <input type="text" name="name" placeholder="Your name" required style={inputStyle} />
-      <input type="email" name="email" placeholder="Your email" required style={inputStyle} />
+      <input type="text" name="name" placeholder="First and Last Name" required style={inputStyle} />
+      <input type="email" name="email" placeholder="Email" required style={inputStyle} />
       <textarea name="message" placeholder="What's up?" required rows={4} style={{ ...inputStyle, resize: "vertical" }} />
       <button
         type="submit"
