@@ -1,7 +1,11 @@
 {
-  "description": "Streamline collaboration among AI agents like Claude and ChatGPT to enhance productivity and efficiency in managing shared codebases.",
+  "title": "AgentBridge",
+  "description": "Multiple AI agents, one codebase. Claude, ChatGPT, and local Ollama models take turns working on a shared workspace.",
   "robots": {
-    "index": false
+    "index": true
+  },
+  "openGraph": {
+    "image": "https://agentbridge-site-pi.vercel.app/og-image.png"
   },
   "accessibility": {
     "addBypassLinks": false,
