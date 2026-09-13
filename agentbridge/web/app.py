@@ -39,7 +39,7 @@ def create_app(config: Config) -> Flask:
         # The marketing site is a separate static build (landing/) deployed
         # as its own Vercel project. Override with LANDING_URL if that ever
         # moves; this default is where it lives today.
-        landing_url = os.environ.get("LANDING_URL", "https://agentbridge-landing.vercel.app")
+        landing_url = os.environ.get("LANDING_URL", "https://agentbridge-site-pi.vercel.app")
         return redirect(landing_url)
 
     @app.get("/app")

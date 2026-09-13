@@ -59,7 +59,7 @@ const FEATURES = [
   {
     tag: "04 / composable",
     title: "Mix models by task type",
-    body: "Route architecture decisions to Claude, boilerplate to a fast local model, and code review to GPT-4o. Combine strengths across vendors.",
+    body: "Route architecture decisions to Claude, boilerplate to a fast local model, and code review to ChatGPT. Combine strengths across vendors.",
   },
 ];
 
