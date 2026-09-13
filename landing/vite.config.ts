@@ -73,7 +73,16 @@ type FigmaSiteConfiguration = {
   }
 }
 
-/** Applies /.figma/make/site.json to the generated document shell. */
+/**
+ * Applies /.figma/make/site.json to the generated document shell.
+ *
+ * This plugin owns `description`, `og:title`, `og:description`,
+ * `og:image` (+ width/height), and `twitter:card`/`twitter:image` --
+ * don't hand-write those in index.html too, or crawlers see duplicate,
+ * conflicting tags (this broke LinkedIn's link preview once already).
+ * index.html may add tags this plugin doesn't cover (og:type, og:url,
+ * twitter:title/description).
+ */
 function figmaSiteConfiguration(config: FigmaSiteConfiguration): Plugin {
   function sanitizeHtmlValue(value: string | undefined): string {
     return value?.replace(/[^a-zA-Z0-9_-]/g, '') || ''
@@ -127,9 +136,15 @@ function figmaSiteConfiguration(config: FigmaSiteConfiguration): Plugin {
         result = replaceHtmlCommentSlot(result, 'figma:body-start', bodyStart)
         result = replaceHtmlCommentSlot(result, 'figma:body-end', bodyEnd)
 
+        // Several link-preview crawlers (confirmed: LinkedIn) fetch only the
+        // first ~1KB of a page via a Range request rather than the whole
+        // document, so anything past that byte offset is invisible to them
+        // -- including meta tags. 'head-prepend' puts these immediately
+        // after <head> instead of at the end, so they survive a small-range
+        // fetch regardless of how much other content the page grows to add.
         const tags: HtmlTagDescriptor[] = []
         if (description) {
-          tags.push({ tag: 'meta', attrs: { name: 'description', content: description }, injectTo: 'head' })
+          tags.push({ tag: 'meta', attrs: { name: 'description', content: description }, injectTo: 'head-prepend' })
         }
         if (config.robots?.index === false) {
           tags.push({ tag: 'meta', attrs: { name: 'robots', content: 'noindex, nofollow' }, injectTo: 'head' })
@@ -138,10 +153,10 @@ function figmaSiteConfiguration(config: FigmaSiteConfiguration): Plugin {
           tags.push({ tag: 'link', attrs: { rel: 'icon', href: favicon }, injectTo: 'head' })
         }
         if (title) {
-          tags.push({ tag: 'meta', attrs: { property: 'og:title', content: title }, injectTo: 'head' })
+          tags.push({ tag: 'meta', attrs: { property: 'og:title', content: title }, injectTo: 'head-prepend' })
         }
         if (description) {
-          tags.push({ tag: 'meta', attrs: { property: 'og:description', content: description }, injectTo: 'head' })
+          tags.push({ tag: 'meta', attrs: { property: 'og:description', content: description }, injectTo: 'head-prepend' })
         }
         if (socialImage) {
           tags.push(
@@ -152,11 +167,11 @@ function figmaSiteConfiguration(config: FigmaSiteConfiguration): Plugin {
             // index.html, before this plugin-injected tag) they end up
             // orphaned and can make the whole image get dropped from the
             // parsed preview.
-            { tag: 'meta', attrs: { property: 'og:image', content: socialImage }, injectTo: 'head' },
-            { tag: 'meta', attrs: { property: 'og:image:width', content: '1200' }, injectTo: 'head' },
-            { tag: 'meta', attrs: { property: 'og:image:height', content: '630' }, injectTo: 'head' },
-            { tag: 'meta', attrs: { name: 'twitter:card', content: 'summary_large_image' }, injectTo: 'head' },
-            { tag: 'meta', attrs: { name: 'twitter:image', content: socialImage }, injectTo: 'head' },
+            { tag: 'meta', attrs: { property: 'og:image', content: socialImage }, injectTo: 'head-prepend' },
+            { tag: 'meta', attrs: { property: 'og:image:width', content: '1200' }, injectTo: 'head-prepend' },
+            { tag: 'meta', attrs: { property: 'og:image:height', content: '630' }, injectTo: 'head-prepend' },
+            { tag: 'meta', attrs: { name: 'twitter:card', content: 'summary_large_image' }, injectTo: 'head-prepend' },
+            { tag: 'meta', attrs: { name: 'twitter:image', content: socialImage }, injectTo: 'head-prepend' },
           )
         }
 
