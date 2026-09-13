@@ -145,7 +145,16 @@ function figmaSiteConfiguration(config: FigmaSiteConfiguration): Plugin {
         }
         if (socialImage) {
           tags.push(
+            // og:image:width/height must immediately follow og:image in
+            // document order -- parsers (LinkedIn included) treat them as
+            // properties of whichever og:image tag preceded them, so if
+            // they appear anywhere else (e.g. hand-written earlier in
+            // index.html, before this plugin-injected tag) they end up
+            // orphaned and can make the whole image get dropped from the
+            // parsed preview.
             { tag: 'meta', attrs: { property: 'og:image', content: socialImage }, injectTo: 'head' },
+            { tag: 'meta', attrs: { property: 'og:image:width', content: '1200' }, injectTo: 'head' },
+            { tag: 'meta', attrs: { property: 'og:image:height', content: '630' }, injectTo: 'head' },
             { tag: 'meta', attrs: { name: 'twitter:card', content: 'summary_large_image' }, injectTo: 'head' },
             { tag: 'meta', attrs: { name: 'twitter:image', content: socialImage }, injectTo: 'head' },
           )
