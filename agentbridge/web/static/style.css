@@ -2,22 +2,31 @@
   color-scheme: light dark;
   --bg: #0a0a0c;
   --panel: #111116;
+  --surface-2: #18181f;
   --border: #2a2a35;
+  --border-bright: #3d3d50;
   --text: #e8e8f0;
   --muted: #7070a0;
   --accent: #6c6cff;
+  --accent-dim: #6c6cff22;
   --add: #3ddc84;
+  --add-dim: #3ddc8418;
   --del: #f85149;
+  --del-dim: #f8514918;
 
   --anthropic: #d97757;
+  --anthropic-dim: #d9775718;
   --openai: #10a37f;
+  --openai-dim: #10a37f18;
   --ollama: #7c8cff;
+  --ollama-dim: #7c8cff18;
   --auto: #7070a0;
 
   --radius-sm: 6px;
   --radius-md: 12px;
   --radius-pill: 9999px;
   --font-heading: "DM Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-body: "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Consolas, monospace;
 }
 
@@ -27,8 +36,9 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
-  font-family: var(--font-mono);
+  font-family: var(--font-body);
   font-size: 14px;
+  -webkit-font-smoothing: antialiased;
 }
 
 header {
@@ -38,6 +48,8 @@ header {
   gap: 10px;
   padding: 14px 20px;
   border-bottom: 1px solid var(--border);
+  position: relative;
+  background: radial-gradient(ellipse 60% 100% at 20% 0%, var(--accent-dim) 0%, transparent 70%);
 }
 
 .brand { display: flex; align-items: center; gap: 10px; }
@@ -90,8 +102,16 @@ section {
   margin-bottom: 16px;
 }
 
-h2 { margin-top: 0; font-size: 14px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
-h3 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+h2 {
+  margin-top: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+  font-weight: 600;
+}
+h3 { font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
 
 textarea {
   width: 100%;
@@ -100,7 +120,7 @@ textarea {
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   padding: 8px;
-  font-family: inherit;
+  font-family: var(--font-body);
   font-size: 13px;
   resize: vertical;
   transition: border-color 0.15s ease;
@@ -174,7 +194,7 @@ button:disabled { opacity: 0.45; cursor: default; }
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   padding: 7px 9px;
-  font-family: inherit;
+  font-family: var(--font-mono);
   font-size: 13px;
 }
 .key-row input:focus { outline: none; border-color: var(--agent-color, var(--accent)); }
@@ -188,10 +208,20 @@ button:disabled { opacity: 0.45; cursor: default; }
   border-left: 3px solid var(--agent-color, var(--border));
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
+}
+.agent-btn .agent-emoji {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--agent-color, var(--muted)) 15%, transparent);
+  font-size: 12px;
 }
 .agent-btn:hover:not(:disabled) { border-color: var(--agent-color, var(--accent)); box-shadow: 0 0 0 1px var(--agent-color, var(--accent)) inset; }
-.agent-btn small { color: var(--muted); font-weight: 400; }
+.agent-btn small { font-family: var(--font-mono); color: var(--muted); font-weight: 400; }
 .agent-btn.running { animation: shimmer 1.2s ease-in-out infinite; }
 
 @keyframes shimmer {
@@ -220,7 +250,7 @@ button:disabled { opacity: 0.45; cursor: default; }
   to { opacity: 1; transform: translateY(0); }
 }
 
-.entry-head { display: flex; justify-content: space-between; color: var(--muted); font-size: 12px; margin-bottom: 6px; }
+.entry-head { display: flex; justify-content: space-between; font-family: var(--font-mono); color: var(--muted); font-size: 12px; margin-bottom: 6px; }
 .entry-agent { color: var(--agent-color, var(--accent)); font-weight: 600; }
 .entry-message { margin: 6px 0; white-space: pre-wrap; }
 .entry-files { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
@@ -229,6 +259,7 @@ button:disabled { opacity: 0.45; cursor: default; }
   border: 1px solid var(--border);
   border-radius: var(--radius-pill);
   padding: 3px 10px;
+  font-family: var(--font-mono);
   font-size: 12px;
   cursor: pointer;
   transition: border-color 0.15s ease, transform 0.1s ease;

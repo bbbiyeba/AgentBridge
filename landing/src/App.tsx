@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import type { CSSProperties, FormEvent } from "react";
 
 const AGENTS = [
   {
@@ -37,6 +38,7 @@ const NAV_ITEMS = [
   { label: "Features", href: "#features" },
   { label: "Agents", href: "#agents" },
   { label: "Workflow", href: "#workflow" },
+  { label: "Contact", href: "#contact" },
   { label: "Docs", href: "https://github.com/bbbiyeba/AgentBridge#readme", external: true },
 ];
 
@@ -201,6 +203,99 @@ function AgentCard({ agent, active }: { agent: typeof AGENTS[0]; active: boolean
         {agent.model}
       </div>
     </div>
+  );
+}
+
+// Web3Forms access keys are meant to be public client-side (they only let
+// something send TO the registered email, not read anything) - safe to
+// commit. Override via VITE_WEB3FORMS_ACCESS_KEY if it's ever rotated.
+const WEB3FORMS_ACCESS_KEY =
+  import.meta.env.VITE_WEB3FORMS_ACCESS_KEY || "6f72d69b-efd9-4529-8d43-29411795dcb6";
+
+function ContactForm() {
+  const [status, setStatus] = useState<"idle" | "sending" | "sent" | "error">("idle");
+  const [errorMessage, setErrorMessage] = useState("");
+
+  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (!WEB3FORMS_ACCESS_KEY) {
+      setStatus("error");
+      setErrorMessage("Contact form isn't configured yet (missing access key).");
+      return;
+    }
+    setStatus("sending");
+    const form = e.currentTarget;
+    const data = new FormData(form);
+    data.append("access_key", WEB3FORMS_ACCESS_KEY);
+    data.append("subject", "New message from the AgentBridge site");
+    try {
+      const res = await fetch("https://api.web3forms.com/submit", {
+        method: "POST",
+        headers: { Accept: "application/json" },
+        body: data,
+      });
+      const result = await res.json();
+      if (result.success) {
+        setStatus("sent");
+        form.reset();
+      } else {
+        setStatus("error");
+        setErrorMessage(result.message || "Something went wrong sending that.");
+      }
+    } catch {
+      setStatus("error");
+      setErrorMessage("Could not reach the form service. Try again in a bit.");
+    }
+  }
+
+  const inputStyle: CSSProperties = {
+    background: "var(--color-bg)",
+    border: "1px solid var(--color-border)",
+    borderRadius: 10,
+    padding: "10px 12px",
+    color: "var(--color-text)",
+    fontFamily: "var(--font-body)",
+    fontSize: 14,
+    width: "100%",
+  };
+
+  if (status === "sent") {
+    return (
+      <div
+        className="rounded-xl p-6 border text-sm"
+        style={{ borderColor: "var(--color-border)", background: "var(--color-surface)", color: "var(--color-text)" }}
+      >
+        <span style={{ color: "var(--color-green)" }}>✓</span> Thanks — that's sent. I'll get back to you soon.
+      </div>
+    );
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="flex flex-col gap-3 max-w-md">
+      <input type="text" name="name" placeholder="Your name" required style={inputStyle} />
+      <input type="email" name="email" placeholder="Your email" required style={inputStyle} />
+      <textarea name="message" placeholder="What's up?" required rows={4} style={{ ...inputStyle, resize: "vertical" }} />
+      <button
+        type="submit"
+        disabled={status === "sending"}
+        className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl font-medium text-sm transition-all duration-200 w-fit"
+        style={{
+          background: "var(--color-accent)",
+          color: "#fff",
+          fontFamily: "var(--font-display)",
+          opacity: status === "sending" ? 0.6 : 1,
+          cursor: status === "sending" ? "default" : "pointer",
+          border: "none",
+        }}
+      >
+        {status === "sending" ? "Sending..." : "Send message"}
+      </button>
+      {status === "error" && (
+        <p className="text-xs" style={{ color: "#f85149" }}>
+          {errorMessage}
+        </p>
+      )}
+    </form>
   );
 }
 
@@ -626,6 +721,54 @@ export default function App() {
         </div>
       </section>
 
+      {/* Contact */}
+      <section id="contact" className="border-t" style={{ borderColor: "var(--color-border)" }}>
+        <div className="max-w-6xl mx-auto px-6 md:px-12 py-20 md:py-28">
+          <div
+            className="text-xs mb-3"
+            style={{ fontFamily: "var(--font-mono)", color: "var(--color-accent)" }}
+          >
+            get in touch
+          </div>
+          <h2
+            className="text-3xl md:text-4xl font-semibold tracking-tight mb-4"
+            style={{ fontFamily: "var(--font-display)", color: "var(--color-text)" }}
+          >
+            Questions, bugs, or ideas?
+          </h2>
+          <p className="text-sm leading-relaxed mb-8 max-w-md" style={{ color: "var(--color-muted)" }}>
+            Send a message directly, or open an issue on GitHub if it's a bug or feature request.
+          </p>
+          <div className="grid md:grid-cols-2 gap-12 items-start">
+            <ContactForm />
+            <div className="flex flex-col gap-3">
+              <a
+                href="https://github.com/bbbiyeba"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 text-sm w-fit"
+                style={{ color: "var(--color-muted)", fontFamily: "var(--font-body)" }}
+                onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.color = "var(--color-text)")}
+                onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.color = "var(--color-muted)")}
+              >
+                <span style={{ color: "var(--color-accent)" }}>★</span> github.com/bbbiyeba
+              </a>
+              <a
+                href="https://github.com/bbbiyeba/AgentBridge/issues"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 text-sm w-fit"
+                style={{ color: "var(--color-muted)", fontFamily: "var(--font-body)" }}
+                onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.color = "var(--color-text)")}
+                onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.color = "var(--color-muted)")}
+              >
+                <span style={{ color: "var(--color-accent)" }}>⚑</span> Report an issue
+              </a>
+            </div>
+          </div>
+        </div>
+      </section>
+
       {/* Footer */}
       <footer className="border-t px-6 md:px-12 py-8" style={{ borderColor: "var(--color-border)" }}>
         <div className="max-w-6xl mx-auto flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
@@ -636,14 +779,24 @@ export default function App() {
             >
               A
             </div>
-            <span className="text-xs font-semibold" style={{ fontFamily: "var(--font-display)", color: "var(--color-muted)" }}>
-              AgentBridge
+            <span className="text-xs" style={{ fontFamily: "var(--font-body)", color: "var(--color-muted)" }}>
+              Built by{" "}
+              <a
+                href="https://github.com/bbbiyeba"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-semibold hover:text-white transition-colors"
+                style={{ color: "var(--color-muted)" }}
+              >
+                Bryce Biyeba
+              </a>
             </span>
           </div>
           <div className="flex items-center gap-6 text-xs" style={{ color: "var(--color-muted)", fontFamily: "var(--font-mono)" }}>
             <a href="https://github.com/bbbiyeba/AgentBridge#readme" target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors">docs</a>
             <a href="https://github.com/bbbiyeba/AgentBridge" target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors">github</a>
             <a href="https://agent-bridge-one.vercel.app/app" target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors">dashboard</a>
+            <a href="#contact" className="hover:text-white transition-colors">contact</a>
           </div>
         </div>
       </footer>
