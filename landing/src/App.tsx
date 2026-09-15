@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import type { CSSProperties, FormEvent } from "react";
+import { Analytics } from "@vercel/analytics/react";
 
 const AGENTS = [
   {
@@ -812,6 +813,7 @@ export default function App() {
           </div>
         </div>
       </footer>
+      <Analytics />
     </div>
   );
 }
