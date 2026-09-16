@@ -1,5 +1,7 @@
 import os
 import secrets
+import time
+from collections import defaultdict, deque
 
 from flask import Flask, jsonify, redirect, render_template, request, session, url_for
 from werkzeug.middleware.proxy_fix import ProxyFix
@@ -8,19 +10,58 @@ from .. import auth as google_auth
 from .. import keystore
 from ..config import Config
 from ..mailboard import Mailboard
-from ..orchestrator import Orchestrator, build_file_tree
+from ..orchestrator import KEYED_PROVIDERS, Orchestrator, build_file_tree
 from ..providers import ProviderError
+
+# Simple in-memory sliding-window rate limit for turn-triggering endpoints.
+# Resets on every cold start and isn't shared across serverless instances,
+# so it's not a hard guarantee on platforms like Vercel -- but it's free,
+# dependency-free, and still meaningfully slows down abuse within one warm
+# instance, which is the realistic threat here (BYOK means callers spend
+# their own API credits, not the operator's).
+RATE_LIMIT_WINDOW_SECONDS = 60
+RATE_LIMIT_MAX_REQUESTS = 20
+_rate_limit_buckets: dict[str, deque] = defaultdict(deque)
+
+
+def _rate_limited(key: str) -> bool:
+    now = time.monotonic()
+    bucket = _rate_limit_buckets[key]
+    while bucket and now - bucket[0] > RATE_LIMIT_WINDOW_SECONDS:
+        bucket.popleft()
+    if len(bucket) >= RATE_LIMIT_MAX_REQUESTS:
+        return True
+    bucket.append(now)
+    return False
 
 
 def create_app(config: Config) -> Flask:
     app = Flask(__name__)
-    # Trust the platform's proxy (Vercel, PythonAnywhere, etc.) for scheme/host,
-    # so url_for(..., _external=True) builds correct https:// OAuth redirect URIs.
-    app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
+    # Trust the platform's proxy (Vercel, PythonAnywhere, etc.) for scheme,
+    # host, and the real client IP (needed for rate limiting -- without
+    # x_for, every request looks like it comes from the platform's internal
+    # proxy address), so url_for(..., _external=True) builds correct
+    # https:// OAuth redirect URIs and request.remote_addr is meaningful.
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1, x_for=1)
     # Falls back to a random key when unset: fine when Google login isn't
     # configured anyway; set FLASK_SECRET_KEY to keep sessions alive across
     # restarts when it is.
     app.secret_key = os.environ.get("FLASK_SECRET_KEY") or secrets.token_hex(32)
+    app.config["SESSION_COOKIE_HTTPONLY"] = True
+    # SameSite=Lax (not Strict): Strict would drop our own oauth_state
+    # cookie on the top-level redirect back from accounts.google.com,
+    # breaking login. Lax still blocks cross-site POST, which is what
+    # actually matters for CSRF here.
+    app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+    # Secure cookies only once FLASK_SECRET_KEY is set, which the README
+    # already asks for specifically on real deployments -- forcing Secure
+    # unconditionally would silently break session cookies (and therefore
+    # login) when testing over plain http://localhost.
+    app.config["SESSION_COOKIE_SECURE"] = bool(os.environ.get("FLASK_SECRET_KEY"))
+
+    # Optional shared secret gating POST /api/turn/submit -- see that route
+    # for why. Unset by default so local/trusted use needs no extra setup.
+    worker_submit_token = os.environ.get("WORKER_SUBMIT_TOKEN")
 
     mailboard = Mailboard(config.settings.mailboard_file)
     orchestrator = Orchestrator(config, mailboard)
@@ -127,6 +168,8 @@ def create_app(config: Config) -> Flask:
 
     @app.post("/api/turn")
     def take_turn():
+        if _rate_limited(f"turn:{request.remote_addr}"):
+            return jsonify({"ok": False, "error": "rate limit exceeded, try again shortly"}), 429
         body = request.get_json(silent=True) or {}
         agent = body.get("agent") or None
         # Credentials are used only for this single call and are never
@@ -134,7 +177,13 @@ def create_app(config: Config) -> Flask:
         # Headers take precedence so a terminal/curl caller can supply a key
         # without it ever touching the browser UI or localStorage:
         #   curl -X POST .../api/turn -H "X-Anthropic-Key: $ANTHROPIC_API_KEY" -d '{"agent":"architect"}'
-        credentials = dict(body.get("keys") or {})
+        # Only anthropic/openai are accepted from the request body -- a
+        # caller-supplied "ollama" key is actually a host URL the server
+        # would then send outbound requests to (see providers/ollama_provider.py),
+        # which would let any web visitor make this server issue arbitrary
+        # HTTP requests (SSRF). Header- and account-based credentials below
+        # are already restricted to these two providers by construction.
+        credentials = {k: v for k, v in (body.get("keys") or {}).items() if k in KEYED_PROVIDERS}
         if request.headers.get("X-Anthropic-Key"):
             credentials["anthropic"] = request.headers["X-Anthropic-Key"]
         if request.headers.get("X-Openai-Key"):
@@ -165,7 +214,24 @@ def create_app(config: Config) -> Flask:
     def submit_turn():
         """For local workers: applies a turn's results (already computed on
         the caller's own machine, with the caller's own key) to the shared
-        workspace and ledger. No API key is ever sent to this endpoint."""
+        workspace and ledger. No API key is ever sent to this endpoint.
+
+        This endpoint has no credential of its own to check, only whatever
+        WORKER_SUBMIT_TOKEN the operator configures -- so on a public,
+        BYOK-mode deployment with no token set, anyone could write arbitrary
+        "results" straight into the shared workspace/ledger. Refuse that
+        combination outright rather than silently staying open.
+        """
+        if worker_submit_token:
+            if request.headers.get("X-Worker-Token") != worker_submit_token:
+                return jsonify({"ok": False, "error": "invalid or missing worker token"}), 401
+        elif config.settings.require_client_keys:
+            return jsonify({
+                "ok": False,
+                "error": "worker submissions are disabled on this deployment (set WORKER_SUBMIT_TOKEN to enable)",
+            }), 403
+        if _rate_limited(f"submit:{request.remote_addr}"):
+            return jsonify({"ok": False, "error": "rate limit exceeded, try again shortly"}), 429
         body = request.get_json(silent=True) or {}
         agent = body.get("agent")
         if not agent:

@@ -41,10 +41,14 @@ def _get(url: str) -> dict:
 
 
 def _post(url: str, payload: dict) -> dict:
+    headers = {"content-type": "application/json"}
+    worker_token = os.environ.get("WORKER_SUBMIT_TOKEN")
+    if worker_token:
+        headers["X-Worker-Token"] = worker_token
     req = urllib.request.Request(
         url,
         data=json.dumps(payload).encode("utf-8"),
-        headers={"content-type": "application/json"},
+        headers=headers,
         method="POST",
     )
     try:

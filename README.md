@@ -155,6 +155,25 @@ The CLI (`agentbridge run`) always keeps using your local env vars
 regardless of this setting — it's meant for you, running trusted, not for
 public visitors.
 
+**Locking down `/api/turn/submit`:** on a private/local deployment, that
+endpoint is left open by default so a worker just works with no setup. On a
+public deployment (`require_client_keys: true`), leaving it open would let
+any visitor write fake turns straight into the shared workspace, so it's
+refused outright unless you set a shared secret:
+
+```bash
+# on the server:
+WORKER_SUBMIT_TOKEN = "any long random string"
+
+# on your machine, before running the worker:
+$env:WORKER_SUBMIT_TOKEN = "the same string"
+python -m agentbridge worker --server https://your-host --agent architect
+```
+
+The worker sends it as an `X-Worker-Token` header; it's a shared secret
+between you and your own server, not something that ever needs to be
+shared with visitors.
+
 ### Deploying to PythonAnywhere (free tier)
 
 PythonAnywhere's free tier gives you a real public URL
@@ -242,6 +261,7 @@ keys (the default) never touch your server's storage at all.
 | `UPSTASH_REDIS_REST_TOKEN` | from step 2 |
 | `KEY_ENCRYPTION_SECRET` | any long random string you generate yourself — e.g. `python -c "import secrets; print(secrets.token_hex(32))"` |
 | `FLASK_SECRET_KEY` | another long random string (same command) — signs the login session cookie |
+| `WORKER_SUBMIT_TOKEN` | optional — a shared secret between you and your server that gates `POST /api/turn/submit`; see [worker mode](#zero-trust-mode-run-the-agent-yourself-with-agentbridge-worker) above. Required if you want to run workers against a `require_client_keys: true` deployment. |
 
 Redeploy after setting these. The "Sign in with Google" link appears automatically once `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` are set — nothing to change in `config.yaml`. Without Upstash configured, saved keys just won't persist even if login works; without Google configured, the whole feature stays hidden and everything behaves exactly as before.
 
