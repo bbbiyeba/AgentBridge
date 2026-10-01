@@ -9,9 +9,26 @@ export type IntegrationStatus = {
   gmail?: { configured: boolean };
   drive?: { configured: boolean; files?: string[] };
   figma?: { configured: boolean; embed_url?: string };
+  github?: { configured: boolean; username?: string };
+  calendly?: { configured: boolean; url?: string };
 };
 
 export type FigmaImage = { id: string; name: string; url: string };
+
+export type GitHubStats = {
+  profile: { login: string; name: string | null; avatar_url: string; html_url: string };
+  totals: { public_repos: number; stars: number; followers: number; contributions_last_year: number | null };
+  languages: { name: string; repos: number }[];
+  featured: {
+    name: string;
+    description: string | null;
+    url: string;
+    stars: number;
+    forks: number;
+    language: string | null;
+    pushed_at: string | null;
+  }[];
+};
 
 export class ApiError extends Error {}
 
@@ -65,6 +82,24 @@ export function fetchFigmaImages() {
   return api<{ images: FigmaImage[]; file: { name?: string; lastModified?: string }; embed_url: string }>(
     "/figma/images",
   );
+}
+
+export function fetchGitHubStats() {
+  return api<GitHubStats>("/github/stats");
+}
+
+// Calendly's inline-embed parameters (the same ones its widget.js adds),
+// themed to match the site. Colors only apply on paid Calendly plans.
+export function calendlyEmbedUrl(url: string) {
+  const params = new URLSearchParams({
+    embed_domain: window.location.hostname,
+    embed_type: "Inline",
+    hide_gdpr_banner: "1",
+    background_color: "111116",
+    text_color: "e8e8f0",
+    primary_color: "6c6cff",
+  });
+  return `${url}?${params}`;
 }
 
 export function driveFileUrl(alias: string, download = false) {

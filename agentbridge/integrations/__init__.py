@@ -16,12 +16,15 @@ unconfigured, errors as JSON, rate limits, CORS -- comes from web.py.
 from flask import Blueprint
 
 from .base import Integration, IntegrationError, NotConfiguredError, Route, Setting
+from .calendly import CalendlyIntegration
 from .drive import DriveIntegration
 from .figma import FigmaIntegration
+from .github import GitHubIntegration
 from .gmail import GmailIntegration
 
 REGISTRY: dict[str, type[Integration]] = {
-    cls.name: cls for cls in (GmailIntegration, DriveIntegration, FigmaIntegration)
+    cls.name: cls
+    for cls in (GmailIntegration, DriveIntegration, FigmaIntegration, GitHubIntegration, CalendlyIntegration)
 }
 
 

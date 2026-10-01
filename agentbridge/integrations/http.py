@@ -79,9 +79,13 @@ def request(
                 attempt += 1
                 time.sleep(_backoff(attempt, e.headers.get("Retry-After")))
                 continue
+            # Some APIs (GitHub) report an exhausted quota as a 403, which
+            # would otherwise read as "bad credentials". Their headers say
+            # which it really is. Not retried: the quota may reset in an hour.
+            code = 429 if e.code == 403 and (e.headers or {}).get("X-RateLimit-Remaining") == "0" else e.code
             raise IntegrationError(
-                _public_message(service, e.code),
-                status=_status_for(e.code),
+                _public_message(service, code),
+                status=_status_for(code),
                 detail=f"{method} {_redact(url)} -> HTTP {e.code}: {detail}",
             ) from e
         except (urllib.error.URLError, TimeoutError) as e:

@@ -265,7 +265,7 @@ keys (the default) never touch your server's storage at all.
 
 Redeploy after setting these. The "Sign in with Google" link appears automatically once `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` are set — nothing to change in `config.yaml`. Without Upstash configured, saved keys just won't persist even if login works; without Google configured, the whole feature stays hidden and everything behaves exactly as before.
 
-## Site integrations (Gmail, Google Drive, Figma)
+## Site integrations (Gmail, Google Drive, Figma, GitHub, Calendly)
 
 The public landing site can use a few third-party services through this
 Flask backend, which holds the credentials (a static site can't keep a
@@ -276,6 +276,8 @@ secret):
 | Contact form sends real email to your inbox | `gmail` | `POST /api/integrations/gmail/contact` |
 | "Resume" link served live from Google Drive | `drive` | `GET /api/integrations/drive/files/<alias>` |
 | "Designed in Figma" gallery of live frame renders | `figma` | `GET /api/integrations/figma/images` |
+| "Built in the open" GitHub stats and featured repos | `github` | `GET /api/integrations/github/stats` |
+| "Book a call" calendar embed | `calendly` | none (the browser embeds Calendly directly) |
 
 Each one is **off until its env vars are set**. While it's off, the matching
 site feature hides itself, and the contact form keeps using Web3Forms. So
@@ -379,6 +381,35 @@ eat into Figma's API rate limits. The status endpoint also exposes an
 `embed_url` if you'd rather show an interactive embed. That requires the
 file to be shared as "anyone with the link can view".
 
+### GitHub: live stats and featured repos
+
+Shows your public repo count, total stars, followers and most-used
+languages, plus cards for featured repos. It's cached for 10 minutes and
+at the CDN, so traffic doesn't multiply API calls. Only public data is used.
+
+| Variable | Value |
+|---|---|
+| `GITHUB_USERNAME` | your GitHub username |
+| `GITHUB_TOKEN` | optional, but **recommended on Vercel** (see below) |
+| `GITHUB_FEATURED_REPOS` | optional: `AgentBridge,other-repo`. Default: your 4 most-starred, non-archived, non-fork repos. |
+
+**Why set a token:** without one, GitHub allows 60 API calls per hour per IP
+address. Vercel's servers share IP addresses with other people's apps, so
+that quota can run out through no fault of yours. A token also adds a
+"Contributions this year" tile. To create one: GitHub → **Settings →
+Developer settings → Fine-grained tokens → Generate new token**, with
+**Public repositories (read-only)** access and no other permissions.
+
+### Calendly: booking widget
+
+No API or secret is involved; the browser embeds your booking page
+directly. Set `CALENDLY_URL` to your page, e.g.
+`https://calendly.com/your-name/30min`, and a "Book a time" section plus a
+"Book a call" link next to the contact form appear. Only `https://calendly.com/...`
+URLs are accepted, since the value goes into an iframe. The embed's colors
+match the site on paid Calendly plans; on the free plan, Calendly uses its
+default theme.
+
 ### Connecting the landing site
 
 The landing site calls `https://agent-bridge-one.vercel.app` by default.
@@ -388,50 +419,31 @@ browser requests from origins in `INTEGRATIONS_ALLOWED_ORIGINS`
 (comma-separated, default: the landing site's URL). Add
 `http://localhost:8443` there for local development against a deployed backend.
 
-### Adding another integration (GitHub stats, Calendly, an AI chat widget, ...)
+### Adding another integration
 
 Every integration follows the same shape. The shared code in
 `agentbridge/integrations/` already handles mounting the routes, returning
 503 when unconfigured, JSON errors (upstream details go to the server log,
-never to visitors), per-IP rate limits, CORS and retries.
+never to visitors), per-IP rate limits, CORS, retries, and telling rate
+limits apart from bad credentials.
 
-1. Create `agentbridge/integrations/<name>.py`:
-
-   ```python
-   from . import http
-   from .base import Integration, Route, Setting, TTLCache
-
-   class GitHubIntegration(Integration):
-       name = "github"
-       title = "GitHub"
-       settings = (
-           Setting("GITHUB_USERNAME", "Whose stats to show.", secret=False),
-           Setting("GITHUB_TOKEN", "Optional token for higher rate limits.", required=False),
-       )
-       cache = TTLCache(600)
-
-       def routes(self):
-           return [Route("/stats", self.stats, cache_control="public, s-maxage=600")]
-
-       def stats(self):
-           def load():
-               user = self.require("GITHUB_USERNAME")
-               token = self.get("GITHUB_TOKEN")
-               headers = {"Authorization": f"Bearer {token}"} if token else {}
-               data = http.request("GET", f"https://api.github.com/users/{user}",
-                                   service=self.title, headers=headers).json()
-               return {"repos": data["public_repos"], "followers": data["followers"]}
-           return self.cache.get_or_set("stats", load)
-   ```
+1. Create `agentbridge/integrations/<name>.py` with a subclass of
+   `Integration` that declares `settings` (its env vars) and `routes()`.
+   Call the external API through `http.request()`. Use
+   **`github.py` as the template**: it's a complete real example with
+   optional auth, caching, pagination, and a best-effort extra call that
+   can fail without breaking the response. `calendly.py` shows a
+   settings-only integration with no routes.
 2. Add the class to `REGISTRY` in `agentbridge/integrations/__init__.py`.
 3. Add a fetch helper in `landing/src/integrations.ts`, and a component
    that renders only when `useIntegrations()?.<name>?.configured` is true.
+4. Add tests in `tests/test_integrations.py`. The `FakeUpstream` helper
+   stands in for the external API.
 
-Some specifics for the ones you're likely to add:
-- **Calendly** needs no secret for a booking widget; it's a frontend embed.
-- **An AI chat widget** spends your API credits on every visitor message.
-  Give its route a strict `rate_limit` and a hard cap on message length
-  before deploying it.
+**If you add an AI chat widget:** it spends your API credits on every
+visitor message. Give its route a strict `rate_limit`, cap the message
+length, and set a monthly spend limit in your provider's console before
+deploying it.
 
 Run the tests with `python -m unittest discover tests`.
 
@@ -462,7 +474,7 @@ agentbridge/
   worker.py          Local worker: runs a turn's provider call on your own machine
   auth.py            Optional "Sign in with Google" (see README section below)
   keystore.py        Optional encrypted per-user key storage (Upstash Redis)
-  integrations/      Gmail / Drive / Figma for the landing site (see "Site integrations")
+  integrations/      Gmail / Drive / Figma / GitHub / Calendly for the landing site (see "Site integrations")
   ratelimit.py       Shared in-memory per-IP rate limiter
   config.py          Loads config.yaml into AgentConfig/Settings
   mailboard.py       mailboard.json ledger read/write

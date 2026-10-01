@@ -116,7 +116,7 @@ class StatusAndPlumbingTests(IntegrationTestCase):
 
     def test_status_lists_every_integration_without_leaking_settings(self):
         data = self.client.get("/api/integrations").get_json()
-        self.assertEqual(set(data["integrations"]), {"gmail", "drive", "figma"})
+        self.assertEqual(set(data["integrations"]), {"gmail", "drive", "figma", "github", "calendly"})
         self.assertFalse(data["integrations"]["drive"]["configured"])
         self.assertNotIn("files", data["integrations"]["drive"])
         self.assertNotIn("GOOGLE_SERVICE_ACCOUNT_JSON", json.dumps(data))
@@ -408,13 +408,105 @@ class HelperTests(unittest.TestCase):
         with self.assertRaises(integrations.IntegrationError):
             google.parse_service_account("not json or base64!")
 
-    def test_every_integration_declares_routes_and_settings(self):
+    def test_every_integration_declares_settings_and_starts_unconfigured(self):
         for name, cls in integrations.REGISTRY.items():
             integ = cls(environ={})
             self.assertEqual(integ.name, name)
             self.assertTrue(integ.settings)
-            self.assertTrue(integ.routes())
             self.assertFalse(integ.is_configured())
+
+
+class GitHubTests(IntegrationTestCase):
+    env = {"GITHUB_USERNAME": "bbbiyeba", "GITHUB_TOKEN": "ghp_test"}
+
+    REPOS = [
+        {"name": "AgentBridge", "stargazers_count": 12, "forks_count": 2, "language": "Python",
+         "html_url": "https://github.com/bbbiyeba/AgentBridge", "pushed_at": "2026-10-01T00:00:00Z"},
+        {"name": "site", "stargazers_count": 3, "language": "TypeScript", "pushed_at": "2026-09-01T00:00:00Z"},
+        {"name": "old", "stargazers_count": 50, "language": "Python", "archived": True},
+        {"name": "someone-elses", "stargazers_count": 999, "language": "Rust", "fork": True},
+    ]
+
+    def setUp(self):
+        super().setUp()
+        self.upstream.on(
+            "GET",
+            "https://api.github.com/users/bbbiyeba",
+            lambda c: (200, {"login": "bbbiyeba", "name": "Bryce", "public_repos": 4, "followers": 9,
+                             "html_url": "https://github.com/bbbiyeba", "avatar_url": "https://a/x.png"}),
+        )
+        self.upstream.on("GET", "https://api.github.com/users/bbbiyeba/repos", lambda c: (200, self.REPOS))
+        self.upstream.on(
+            "POST",
+            "https://api.github.com/graphql",
+            lambda c: (200, {"data": {"user": {"contributionsCollection": {
+                "contributionCalendar": {"totalContributions": 321}}}}}),
+        )
+
+    def test_stats(self):
+        data = self.client.get("/api/integrations/github/stats").get_json()
+        self.assertEqual(data["totals"], {"public_repos": 4, "stars": 65, "followers": 9,
+                                          "contributions_last_year": 321})
+        # forks excluded from stars and languages; archived repos aren't featured
+        self.assertEqual(data["languages"], [{"name": "Python", "repos": 2}, {"name": "TypeScript", "repos": 1}])
+        self.assertEqual([r["name"] for r in data["featured"]], ["AgentBridge", "site"])
+        repos_call = next(c for c in self.upstream.calls if c["url"].endswith("/repos"))
+        self.assertEqual(repos_call["headers"]["authorization"], "Bearer ghp_test")
+
+    def test_featured_override(self):
+        with mock.patch.dict(os.environ, {"GITHUB_FEATURED_REPOS": "site, missing"}):
+            data = self.client.get("/api/integrations/github/stats").get_json()
+        self.assertEqual([r["name"] for r in data["featured"]], ["site"])
+
+    def test_contributions_failure_degrades_gracefully(self):
+        self.upstream.on("POST", "https://api.github.com/graphql", lambda c: (401, b"bad creds"))
+        resp = self.client.get("/api/integrations/github/stats")
+        self.assertEqual(resp.status_code, 200)
+        self.assertIsNone(resp.get_json()["totals"]["contributions_last_year"])
+
+    def test_no_token_skips_graphql(self):
+        with mock.patch.dict(os.environ, {"GITHUB_TOKEN": ""}):
+            data = self.client.get("/api/integrations/github/stats").get_json()
+        self.assertIsNone(data["totals"]["contributions_last_year"])
+        self.assertFalse(any(c["url"].endswith("/graphql") for c in self.upstream.calls))
+        self.assertNotIn("authorization", self.upstream.calls[0]["headers"])
+
+    def test_quota_exhaustion_is_reported_as_rate_limit_not_bad_credentials(self):
+        self.upstream.on(
+            "GET",
+            "https://api.github.com/users/bbbiyeba",
+            lambda c: (403, b'{"message": "API rate limit exceeded"}', {"X-RateLimit-Remaining": "0"}),
+        )
+        resp = self.client.get("/api/integrations/github/stats")
+        self.assertEqual(resp.status_code, 503)
+        self.assertIn("rate limiting", resp.get_json()["error"])
+
+    def test_paginates_large_accounts(self):
+        page1 = [{"name": f"r{i}", "stargazers_count": 1} for i in range(100)]
+        self.upstream.on(
+            "GET",
+            "https://api.github.com/users/bbbiyeba/repos",
+            lambda c: (200, page1 if c["query"]["page"] == "1" else [{"name": "last", "stargazers_count": 5}]),
+        )
+        data = self.client.get("/api/integrations/github/stats").get_json()
+        self.assertEqual(data["totals"]["stars"], 105)
+
+
+class CalendlyTests(IntegrationTestCase):
+    def status(self, url):
+        with mock.patch.dict(os.environ, {"CALENDLY_URL": url}):
+            return self.client.get("/api/integrations").get_json()["integrations"]["calendly"]
+
+    def test_valid_url_is_exposed(self):
+        self.assertEqual(
+            self.status("https://calendly.com/bryce-biyeba/30min/"),
+            {"title": "Calendly", "configured": True, "url": "https://calendly.com/bryce-biyeba/30min"},
+        )
+
+    def test_non_calendly_urls_are_rejected(self):
+        for bad in ("https://evil.example/calendly.com/x", "javascript:alert(1)", "http://calendly.com/x",
+                    "https://calendly.com/x/y/z", "https://calendly.com.evil.example/x"):
+            self.assertEqual(self.status(bad), {"title": "Calendly", "configured": False}, bad)
 
 
 if __name__ == "__main__":
