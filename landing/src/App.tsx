@@ -1,6 +1,15 @@
 import { useState, useEffect, useRef } from "react";
 import type { CSSProperties, FormEvent } from "react";
 import { Analytics } from "@vercel/analytics/react";
+import {
+  ApiError,
+  driveFileUrl,
+  fetchFigmaImages,
+  getIntegrations,
+  sendContact,
+  useIntegrations,
+} from "./integrations";
+import type { FigmaImage } from "./integrations";
 
 const AGENTS = [
   {
@@ -219,14 +228,36 @@ function ContactForm() {
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    const form = e.currentTarget;
+    const data = new FormData(form);
+
+    // Prefer sending through the backend's Gmail integration; until that's
+    // configured, keep using Web3Forms so the form never goes dark.
+    if ((await getIntegrations()).gmail?.configured) {
+      setStatus("sending");
+      try {
+        await sendContact({
+          name: String(data.get("name") ?? ""),
+          email: String(data.get("email") ?? ""),
+          message: String(data.get("message") ?? ""),
+          website: String(data.get("website") ?? ""),
+        });
+        setStatus("sent");
+        form.reset();
+      } catch (err) {
+        setStatus("error");
+        setErrorMessage(err instanceof ApiError ? err.message : "Something went wrong sending that.");
+      }
+      return;
+    }
+
     if (!WEB3FORMS_ACCESS_KEY) {
       setStatus("error");
       setErrorMessage("Contact form isn't configured yet (missing access key).");
       return;
     }
     setStatus("sending");
-    const form = e.currentTarget;
-    const data = new FormData(form);
+    data.delete("website");
     data.append("access_key", WEB3FORMS_ACCESS_KEY);
     data.append("subject", "New message from the AgentBridge site");
     try {
@@ -275,7 +306,16 @@ function ContactForm() {
     <form onSubmit={handleSubmit} className="flex flex-col gap-3 max-w-md">
       <input type="text" name="name" placeholder="First and Last Name" required style={inputStyle} />
       <input type="email" name="email" placeholder="Email" required style={inputStyle} />
-      <textarea name="message" placeholder="What's up?" required rows={4} style={{ ...inputStyle, resize: "vertical" }} />
+      <textarea name="message" placeholder="What's up?" required rows={4} maxLength={5000} style={{ ...inputStyle, resize: "vertical" }} />
+      {/* Honeypot: hidden from people and screen readers; bots fill it in and the backend drops their message. */}
+      <input
+        type="text"
+        name="website"
+        tabIndex={-1}
+        autoComplete="off"
+        aria-hidden="true"
+        style={{ position: "absolute", left: "-10000px", width: 1, height: 1, overflow: "hidden" }}
+      />
       <button
         type="submit"
         disabled={status === "sending"}
@@ -297,6 +337,83 @@ function ContactForm() {
         </p>
       )}
     </form>
+  );
+}
+
+// Live renders of frames from a Figma file, via the backend's Figma
+// integration. Renders nothing until that integration is configured.
+function DesignShowcase() {
+  const integrations = useIntegrations();
+  const enabled = !!integrations?.figma?.configured;
+  const [images, setImages] = useState<FigmaImage[]>([]);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!enabled) return;
+    fetchFigmaImages()
+      .then((d) => setImages(d.images))
+      .catch((err) => setError(err instanceof ApiError ? err.message : "Couldn't load designs."));
+  }, [enabled]);
+
+  if (!enabled || (!images.length && !error)) return null;
+
+  return (
+    <section id="design" className="border-t" style={{ borderColor: "var(--color-border)" }}>
+      <div className="max-w-6xl mx-auto px-6 md:px-12 py-20 md:py-28">
+        <div className="text-xs mb-3" style={{ fontFamily: "var(--font-mono)", color: "var(--color-accent)" }}>
+          design · live from figma
+        </div>
+        <h2
+          className="text-3xl md:text-4xl font-semibold tracking-tight mb-10"
+          style={{ fontFamily: "var(--font-display)", color: "var(--color-text)" }}
+        >
+          Designed in Figma
+        </h2>
+        {error ? (
+          <p className="text-sm" style={{ color: "var(--color-muted)" }}>
+            {error}
+          </p>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {images.map((img) => (
+              <figure
+                key={img.id}
+                className="rounded-xl border overflow-hidden"
+                style={{ borderColor: "var(--color-border)", background: "var(--color-surface)" }}
+              >
+                <img src={img.url} alt={img.name} loading="lazy" className="w-full h-auto block" />
+                <figcaption
+                  className="px-4 py-3 text-xs border-t"
+                  style={{ borderColor: "var(--color-border)", color: "var(--color-muted)", fontFamily: "var(--font-mono)" }}
+                >
+                  {img.name}
+                </figcaption>
+              </figure>
+            ))}
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+// Link to the resume served live from Google Drive. Shown only when the
+// backend publishes a Drive file under the "resume" alias.
+function ResumeLink() {
+  const integrations = useIntegrations();
+  if (!integrations?.drive?.files?.includes("resume")) return null;
+  return (
+    <a
+      href={driveFileUrl("resume")}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="inline-flex items-center gap-2 text-sm w-fit"
+      style={{ color: "var(--color-muted)", fontFamily: "var(--font-body)" }}
+      onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.color = "var(--color-text)")}
+      onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.color = "var(--color-muted)")}
+    >
+      <span style={{ color: "var(--color-accent)" }}>↓</span> Resume
+    </a>
   );
 }
 
@@ -722,6 +839,8 @@ export default function App() {
         </div>
       </section>
 
+      <DesignShowcase />
+
       {/* Contact */}
       <section id="contact" className="border-t" style={{ borderColor: "var(--color-border)" }}>
         <div className="max-w-6xl mx-auto px-6 md:px-12 py-20 md:py-28">
@@ -776,6 +895,7 @@ export default function App() {
               >
                 <span style={{ color: "var(--color-accent)" }}>⚑</span> Report an issue
               </a>
+              <ResumeLink />
             </div>
           </div>
         </div>

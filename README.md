@@ -265,6 +265,176 @@ keys (the default) never touch your server's storage at all.
 
 Redeploy after setting these. The "Sign in with Google" link appears automatically once `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` are set — nothing to change in `config.yaml`. Without Upstash configured, saved keys just won't persist even if login works; without Google configured, the whole feature stays hidden and everything behaves exactly as before.
 
+## Site integrations (Gmail, Google Drive, Figma)
+
+The public landing site can use a few third-party services through this
+Flask backend, which holds the credentials (a static site can't keep a
+secret):
+
+| Feature on the site | Integration | Endpoint |
+|---|---|---|
+| Contact form sends real email to your inbox | `gmail` | `POST /api/integrations/gmail/contact` |
+| "Resume" link served live from Google Drive | `drive` | `GET /api/integrations/drive/files/<alias>` |
+| "Designed in Figma" gallery of live frame renders | `figma` | `GET /api/integrations/figma/images` |
+
+Each one is **off until its env vars are set**. While it's off, the matching
+site feature hides itself, and the contact form keeps using Web3Forms. So
+you can set them up one at a time, in any order. None of them involves
+visitors logging in.
+
+Check what's configured at any time, locally or with your production
+values exported in your shell:
+
+```bash
+python -m agentbridge integrations            # what's set / missing (secrets shown only as "(set)")
+python -m agentbridge integrations --check    # also makes a real API call to prove each one works
+python -m agentbridge integrations --env-template   # every variable, ready to fill in
+```
+
+On Vercel, set these variables on the **backend** project (the Flask app,
+`agent-bridge-one`), not the landing project, then redeploy.
+
+### Gmail: contact form → your inbox
+
+Mail is sent **from your own Gmail account to your own inbox**. The
+visitor's address is set as Reply-To, so hitting Reply answers them. The
+recipient is fixed server-side, which means nobody can use the form to send
+mail anywhere else. It's rate limited to 5 messages per 10 minutes per IP
+and has a hidden honeypot field to catch bots.
+
+1. In [Google Cloud Console](https://console.cloud.google.com/) (the same
+   project as Google sign-in is fine): **APIs & Services → Library → Gmail
+   API → Enable**.
+2. **OAuth consent screen**: External. Under **Audience**, click **Publish
+   app** so it's "In production". **Don't skip this.** In "Testing" mode
+   Google expires refresh tokens after 7 days and the form silently stops
+   working. You'll see an "unverified app" warning when you authorize it
+   yourself in step 4; that's expected for a personal app (Advanced →
+   continue).
+3. **Credentials → Create credentials → OAuth client ID → Web application**.
+   Add `https://developers.google.com/oauthplayground` as an Authorized
+   redirect URI. Copy the client ID and secret.
+4. Open the [OAuth 2.0 Playground](https://developers.google.com/oauthplayground):
+   - Click the gear icon → **Use your own OAuth credentials** → paste the ID and secret.
+   - In Step 1, enter the scope `https://www.googleapis.com/auth/gmail.send` →
+     **Authorize APIs** → sign in with the Gmail account that should send the mail.
+   - In Step 2, click **Exchange authorization code for tokens** → copy the **Refresh token**.
+
+   Use a personal `@gmail.com` account. School and work Google accounts
+   often block third-party apps from the Gmail API.
+5. Set:
+
+| Variable | Value |
+|---|---|
+| `GMAIL_CLIENT_ID` | from step 3 |
+| `GMAIL_CLIENT_SECRET` | from step 3 |
+| `GMAIL_REFRESH_TOKEN` | from step 4 |
+| `CONTACT_TO_EMAIL` | the inbox that should receive messages |
+
+The only permission granted is `gmail.send`: this server can send mail as
+you, but can't read your inbox.
+
+### Google Drive: files that update without a redeploy
+
+Publish specific Drive files under short aliases. Edit the file in Drive and
+the site serves the new version within about 5 minutes. A Google Doc is
+served as a PDF automatically. Only aliases you list are reachable;
+visitors can never request an arbitrary Drive file ID.
+
+1. Same Cloud project: **APIs & Services → Library → Google Drive API → Enable**.
+2. **IAM & Admin → Service Accounts → Create service account**. It needs no
+   roles. Open it → **Keys → Add key → JSON** and download the file.
+3. In Drive, **share the file** (e.g. your resume) with the service
+   account's `client_email` from that JSON (…@….iam.gserviceaccount.com), as **Viewer**.
+4. Copy the file's ID from its URL: `drive.google.com/file/d/<ID>/view` or
+   `docs.google.com/document/d/<ID>/edit`.
+5. Set:
+
+| Variable | Value |
+|---|---|
+| `GOOGLE_SERVICE_ACCOUNT_JSON` | the whole downloaded JSON file's contents. If your host mangles multi-line values, use the output of `base64 -w0 key.json` instead; both are accepted. |
+| `DRIVE_FILES` | `resume=<ID>`. Add more as `resume=<ID>,portfolio=<ID2>`. The site's Resume link appears when a `resume` alias exists. |
+
+Files are capped at 4 MB, because Vercel limits function responses to 4.5 MB.
+
+### Figma: live renders of your frames
+
+1. Figma → **Settings → Security → Personal access tokens → Generate new
+   token**, with the scope **File content: Read-only**. If it has an
+   expiry date, set a reminder: `--check` starts failing when it lapses.
+2. The file key is in the file's URL: `figma.com/design/<FILE_KEY>/...`
+3. Optionally pick frames: select a frame → **Copy link to selection** →
+   take the `node-id=12-34` part. Without this, the top-level frames on the
+   file's first page are shown (up to 12).
+4. Set:
+
+| Variable | Value |
+|---|---|
+| `FIGMA_TOKEN` | from step 1 |
+| `FIGMA_FILE_KEY` | from step 2 |
+| `FIGMA_NODE_IDS` | optional: `12-34,56-78` |
+
+Renders are cached for an hour (`FIGMA_CACHE_SECONDS`) so page views don't
+eat into Figma's API rate limits. The status endpoint also exposes an
+`embed_url` if you'd rather show an interactive embed. That requires the
+file to be shared as "anyone with the link can view".
+
+### Connecting the landing site
+
+The landing site calls `https://agent-bridge-one.vercel.app` by default.
+Set `VITE_API_BASE` on the landing project if the backend moves (or locally:
+`VITE_API_BASE=http://127.0.0.1:5050 pnpm dev`). The backend only answers
+browser requests from origins in `INTEGRATIONS_ALLOWED_ORIGINS`
+(comma-separated, default: the landing site's URL). Add
+`http://localhost:8443` there for local development against a deployed backend.
+
+### Adding another integration (GitHub stats, Calendly, an AI chat widget, ...)
+
+Every integration follows the same shape. The shared code in
+`agentbridge/integrations/` already handles mounting the routes, returning
+503 when unconfigured, JSON errors (upstream details go to the server log,
+never to visitors), per-IP rate limits, CORS and retries.
+
+1. Create `agentbridge/integrations/<name>.py`:
+
+   ```python
+   from . import http
+   from .base import Integration, Route, Setting, TTLCache
+
+   class GitHubIntegration(Integration):
+       name = "github"
+       title = "GitHub"
+       settings = (
+           Setting("GITHUB_USERNAME", "Whose stats to show.", secret=False),
+           Setting("GITHUB_TOKEN", "Optional token for higher rate limits.", required=False),
+       )
+       cache = TTLCache(600)
+
+       def routes(self):
+           return [Route("/stats", self.stats, cache_control="public, s-maxage=600")]
+
+       def stats(self):
+           def load():
+               user = self.require("GITHUB_USERNAME")
+               token = self.get("GITHUB_TOKEN")
+               headers = {"Authorization": f"Bearer {token}"} if token else {}
+               data = http.request("GET", f"https://api.github.com/users/{user}",
+                                   service=self.title, headers=headers).json()
+               return {"repos": data["public_repos"], "followers": data["followers"]}
+           return self.cache.get_or_set("stats", load)
+   ```
+2. Add the class to `REGISTRY` in `agentbridge/integrations/__init__.py`.
+3. Add a fetch helper in `landing/src/integrations.ts`, and a component
+   that renders only when `useIntegrations()?.<name>?.configured` is true.
+
+Some specifics for the ones you're likely to add:
+- **Calendly** needs no secret for a booking widget; it's a frontend embed.
+- **An AI chat widget** spends your API credits on every visitor message.
+  Give its route a strict `rate_limit` and a hard cap on message length
+  before deploying it.
+
+Run the tests with `python -m unittest discover tests`.
+
 ## The agent response contract
 
 Every turn, the orchestrator asks the agent to respond with exactly one JSON
@@ -292,10 +462,13 @@ agentbridge/
   worker.py          Local worker: runs a turn's provider call on your own machine
   auth.py            Optional "Sign in with Google" (see README section below)
   keystore.py        Optional encrypted per-user key storage (Upstash Redis)
+  integrations/      Gmail / Drive / Figma for the landing site (see "Site integrations")
+  ratelimit.py       Shared in-memory per-IP rate limiter
   config.py          Loads config.yaml into AgentConfig/Settings
   mailboard.py       mailboard.json ledger read/write
   orchestrator.py    The turn loop: prompt building, response parsing, applying writes
-  __main__.py        CLI: `agentbridge run` / `agentbridge web` / `agentbridge worker`
+  __main__.py        CLI: `agentbridge run` / `web` / `worker` / `integrations`
+tests/               Unit tests (python -m unittest discover tests)
 landing/             Marketing site (Vite/React) - a separate deployment, see below
 workspace/           The shared codebase agents read and write (gitignored)
 mailboard.json       The ledger (generated at runtime, gitignored)
