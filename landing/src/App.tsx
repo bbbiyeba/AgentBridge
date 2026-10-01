@@ -1,6 +1,17 @@
 import { useState, useEffect, useRef } from "react";
 import type { CSSProperties, FormEvent } from "react";
 import { Analytics } from "@vercel/analytics/react";
+import {
+  ApiError,
+  calendlyEmbedUrl,
+  driveFileUrl,
+  fetchFigmaImages,
+  fetchGitHubStats,
+  getIntegrations,
+  sendContact,
+  useIntegrations,
+} from "./integrations";
+import type { FigmaImage, GitHubStats } from "./integrations";
 
 const AGENTS = [
   {
@@ -219,14 +230,36 @@ function ContactForm() {
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    const form = e.currentTarget;
+    const data = new FormData(form);
+
+    // Prefer sending through the backend's Gmail integration; until that's
+    // configured, keep using Web3Forms so the form never goes dark.
+    if ((await getIntegrations()).gmail?.configured) {
+      setStatus("sending");
+      try {
+        await sendContact({
+          name: String(data.get("name") ?? ""),
+          email: String(data.get("email") ?? ""),
+          message: String(data.get("message") ?? ""),
+          website: String(data.get("website") ?? ""),
+        });
+        setStatus("sent");
+        form.reset();
+      } catch (err) {
+        setStatus("error");
+        setErrorMessage(err instanceof ApiError ? err.message : "Something went wrong sending that.");
+      }
+      return;
+    }
+
     if (!WEB3FORMS_ACCESS_KEY) {
       setStatus("error");
       setErrorMessage("Contact form isn't configured yet (missing access key).");
       return;
     }
     setStatus("sending");
-    const form = e.currentTarget;
-    const data = new FormData(form);
+    data.delete("website");
     data.append("access_key", WEB3FORMS_ACCESS_KEY);
     data.append("subject", "New message from the AgentBridge site");
     try {
@@ -275,7 +308,16 @@ function ContactForm() {
     <form onSubmit={handleSubmit} className="flex flex-col gap-3 max-w-md">
       <input type="text" name="name" placeholder="First and Last Name" required style={inputStyle} />
       <input type="email" name="email" placeholder="Email" required style={inputStyle} />
-      <textarea name="message" placeholder="What's up?" required rows={4} style={{ ...inputStyle, resize: "vertical" }} />
+      <textarea name="message" placeholder="What's up?" required rows={4} maxLength={5000} style={{ ...inputStyle, resize: "vertical" }} />
+      {/* Honeypot: hidden from people and screen readers; bots fill it in and the backend drops their message. */}
+      <input
+        type="text"
+        name="website"
+        tabIndex={-1}
+        autoComplete="off"
+        aria-hidden="true"
+        style={{ position: "absolute", left: "-10000px", width: 1, height: 1, overflow: "hidden" }}
+      />
       <button
         type="submit"
         disabled={status === "sending"}
@@ -297,6 +339,262 @@ function ContactForm() {
         </p>
       )}
     </form>
+  );
+}
+
+// Live renders of frames from a Figma file, via the backend's Figma
+// integration. Renders nothing until that integration is configured.
+function DesignShowcase() {
+  const integrations = useIntegrations();
+  const enabled = !!integrations?.figma?.configured;
+  const [images, setImages] = useState<FigmaImage[]>([]);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!enabled) return;
+    fetchFigmaImages()
+      .then((d) => setImages(d.images))
+      .catch((err) => setError(err instanceof ApiError ? err.message : "Couldn't load designs."));
+  }, [enabled]);
+
+  if (!enabled || (!images.length && !error)) return null;
+
+  return (
+    <section id="design" className="border-t" style={{ borderColor: "var(--color-border)" }}>
+      <div className="max-w-6xl mx-auto px-6 md:px-12 py-20 md:py-28">
+        <div className="text-xs mb-3" style={{ fontFamily: "var(--font-mono)", color: "var(--color-accent)" }}>
+          design · live from figma
+        </div>
+        <h2
+          className="text-3xl md:text-4xl font-semibold tracking-tight mb-10"
+          style={{ fontFamily: "var(--font-display)", color: "var(--color-text)" }}
+        >
+          Designed in Figma
+        </h2>
+        {error ? (
+          <p className="text-sm" style={{ color: "var(--color-muted)" }}>
+            {error}
+          </p>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {images.map((img) => (
+              <figure
+                key={img.id}
+                className="rounded-xl border overflow-hidden"
+                style={{ borderColor: "var(--color-border)", background: "var(--color-surface)" }}
+              >
+                <img src={img.url} alt={img.name} loading="lazy" className="w-full h-auto block" />
+                <figcaption
+                  className="px-4 py-3 text-xs border-t"
+                  style={{ borderColor: "var(--color-border)", color: "var(--color-muted)", fontFamily: "var(--font-mono)" }}
+                >
+                  {img.name}
+                </figcaption>
+              </figure>
+            ))}
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+const compact = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 });
+
+function SectionHeading({ eyebrow, title, aside }: { eyebrow: string; title: string; aside?: React.ReactNode }) {
+  return (
+    <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-10">
+      <div>
+        <div className="text-xs mb-3" style={{ fontFamily: "var(--font-mono)", color: "var(--color-accent)" }}>
+          {eyebrow}
+        </div>
+        <h2
+          className="text-3xl md:text-4xl font-semibold tracking-tight"
+          style={{ fontFamily: "var(--font-display)", color: "var(--color-text)" }}
+        >
+          {title}
+        </h2>
+      </div>
+      {aside}
+    </div>
+  );
+}
+
+// Live GitHub stats via the backend's GitHub integration (cached ~10 min).
+// Renders nothing until that integration is configured and has loaded.
+function GitHubSection() {
+  const integrations = useIntegrations();
+  const enabled = !!integrations?.github?.configured;
+  const [stats, setStats] = useState<GitHubStats | null>(null);
+
+  useEffect(() => {
+    if (!enabled) return;
+    // A failed load just leaves the section hidden; stats are a nice-to-have.
+    fetchGitHubStats().then(setStats).catch(() => {});
+  }, [enabled]);
+
+  if (!stats) return null;
+
+  const tiles = [
+    { label: "Public repos", value: stats.totals.public_repos },
+    { label: "Stars earned", value: stats.totals.stars },
+    { label: "Followers", value: stats.totals.followers },
+    ...(stats.totals.contributions_last_year != null
+      ? [{ label: "Contributions this year", value: stats.totals.contributions_last_year }]
+      : []),
+  ];
+
+  return (
+    <section id="github" className="border-t" style={{ borderColor: "var(--color-border)" }}>
+      <div className="max-w-6xl mx-auto px-6 md:px-12 py-20 md:py-28">
+        <SectionHeading
+          eyebrow="open source · live from github"
+          title="Built in the open"
+          aside={
+            <a
+              href={stats.profile.html_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-sm w-fit"
+              style={{ color: "var(--color-muted)", fontFamily: "var(--font-mono)" }}
+            >
+              github.com/{stats.profile.login} →
+            </a>
+          }
+        />
+
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-10">
+          {tiles.map((t) => (
+            <div
+              key={t.label}
+              className="rounded-xl border p-5"
+              style={{ borderColor: "var(--color-border)", background: "var(--color-surface)" }}
+            >
+              <div className="text-xs mb-2" style={{ color: "var(--color-muted)" }}>
+                {t.label}
+              </div>
+              <div
+                className="text-3xl font-semibold"
+                style={{ color: "var(--color-text)", fontFamily: "var(--font-body)" }}
+                title={t.value.toLocaleString()}
+              >
+                {compact.format(t.value)}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {stats.languages.length > 0 && (
+          <p className="text-sm mb-8" style={{ color: "var(--color-muted)" }}>
+            Most used:{" "}
+            {stats.languages.map((l, i) => (
+              <span key={l.name}>
+                {i > 0 && " · "}
+                <span style={{ color: "var(--color-text)" }}>{l.name}</span> ({l.repos} {l.repos === 1 ? "repo" : "repos"})
+              </span>
+            ))}
+          </p>
+        )}
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {stats.featured.map((r) => (
+            <a
+              key={r.name}
+              href={r.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="rounded-xl border p-5 flex flex-col gap-2 transition-colors"
+              style={{ borderColor: "var(--color-border)", background: "var(--color-surface)" }}
+              onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.borderColor = "var(--color-border-bright)")}
+              onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.borderColor = "var(--color-border)")}
+            >
+              <div className="text-sm font-semibold" style={{ color: "var(--color-text)", fontFamily: "var(--font-mono)" }}>
+                {r.name}
+              </div>
+              {r.description && (
+                <div className="text-sm leading-relaxed" style={{ color: "var(--color-muted)" }}>
+                  {r.description}
+                </div>
+              )}
+              <div className="text-xs flex gap-4 mt-auto pt-2" style={{ color: "var(--color-muted)", fontFamily: "var(--font-mono)" }}>
+                {r.language && <span>{r.language}</span>}
+                <span>★ {compact.format(r.stars)}</span>
+                {r.forks > 0 && <span>⑂ {compact.format(r.forks)}</span>}
+                {r.pushed_at && <span>updated {new Date(r.pushed_at).toLocaleDateString(undefined, { month: "short", year: "numeric" })}</span>}
+              </div>
+            </a>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// Calendly booking page embedded inline. No API call involved; the URL
+// comes from the backend's config so it can change without a rebuild.
+function BookingSection() {
+  const url = useIntegrations()?.calendly?.url;
+  if (!url) return null;
+  return (
+    <section id="book" className="border-t" style={{ borderColor: "var(--color-border)" }}>
+      <div className="max-w-6xl mx-auto px-6 md:px-12 py-20 md:py-28">
+        <SectionHeading eyebrow="book a time" title="Grab a slot on my calendar" />
+        <div
+          className="rounded-xl border overflow-hidden"
+          style={{ borderColor: "var(--color-border)", background: "var(--color-surface)" }}
+        >
+          <iframe
+            src={calendlyEmbedUrl(url)}
+            title="Book a meeting on Calendly"
+            loading="lazy"
+            className="w-full block"
+            style={{ height: 720, border: "none" }}
+          />
+        </div>
+        <p className="text-xs mt-3" style={{ color: "var(--color-muted)" }}>
+          Calendar not loading?{" "}
+          <a href={url} target="_blank" rel="noopener noreferrer" style={{ color: "var(--color-text)" }}>
+            Open it on Calendly
+          </a>
+          .
+        </p>
+      </div>
+    </section>
+  );
+}
+
+function BookingLink() {
+  if (!useIntegrations()?.calendly?.url) return null;
+  return (
+    <a
+      href="#book"
+      className="inline-flex items-center gap-2 text-sm w-fit"
+      style={{ color: "var(--color-muted)", fontFamily: "var(--font-body)" }}
+      onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.color = "var(--color-text)")}
+      onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.color = "var(--color-muted)")}
+    >
+      <span style={{ color: "var(--color-accent)" }}>◷</span> Book a call
+    </a>
+  );
+}
+
+// Link to the resume served live from Google Drive. Shown only when the
+// backend publishes a Drive file under the "resume" alias.
+function ResumeLink() {
+  const integrations = useIntegrations();
+  if (!integrations?.drive?.files?.includes("resume")) return null;
+  return (
+    <a
+      href={driveFileUrl("resume")}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="inline-flex items-center gap-2 text-sm w-fit"
+      style={{ color: "var(--color-muted)", fontFamily: "var(--font-body)" }}
+      onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.color = "var(--color-text)")}
+      onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.color = "var(--color-muted)")}
+    >
+      <span style={{ color: "var(--color-accent)" }}>↓</span> Resume
+    </a>
   );
 }
 
@@ -722,6 +1020,12 @@ export default function App() {
         </div>
       </section>
 
+      <GitHubSection />
+
+      <DesignShowcase />
+
+      <BookingSection />
+
       {/* Contact */}
       <section id="contact" className="border-t" style={{ borderColor: "var(--color-border)" }}>
         <div className="max-w-6xl mx-auto px-6 md:px-12 py-20 md:py-28">
@@ -776,6 +1080,8 @@ export default function App() {
               >
                 <span style={{ color: "var(--color-accent)" }}>⚑</span> Report an issue
               </a>
+              <ResumeLink />
+              <BookingLink />
             </div>
           </div>
         </div>

@@ -52,6 +52,47 @@ def cmd_worker(args: argparse.Namespace) -> None:
         print("\nStopped.")
 
 
+def cmd_integrations(args: argparse.Namespace) -> None:
+    from .integrations import IntegrationError, all_integrations
+
+    integrations = all_integrations()
+    if args.env_template:
+        # A ready-to-fill .env / Vercel env list generated from each
+        # integration's declared settings, so it can't drift from the code.
+        for integ in integrations:
+            print(f"# --- {integ.title} ---")
+            for s in integ.settings:
+                req = "required" if s.required else f"optional, default {s.default!r}" if s.default else "optional"
+                print(f"# {s.description} ({req})")
+                print(f"{s.env}=")
+            print()
+        return
+
+    failed = False
+    for integ in integrations:
+        missing = integ.missing()
+        state = "configured" if not missing else "NOT configured"
+        print(f"{integ.title} [{integ.name}]: {state}")
+        for s in integ.settings:
+            value = integ.get(s.env)
+            if value:
+                shown = "(set)" if s.secret else value
+            else:
+                shown = "MISSING" if s.required else "(unset, optional)"
+            print(f"    {s.env:<30} {shown}")
+        if args.check and not missing:
+            try:
+                print(f"    live check: OK - {integ.check()}")
+            except IntegrationError as e:
+                failed = True
+                print(f"    live check: FAILED - {e.message}")
+                if e.detail:
+                    print(f"      detail: {e.detail}")
+        print()
+    if failed:
+        sys.exit(1)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="agentbridge")
     parser.add_argument("--config", default="config.yaml", help="Path to config.yaml")
@@ -84,6 +125,15 @@ def main() -> None:
         help="Run exactly one turn immediately, regardless of whose turn it currently is, then exit",
     )
     worker_p.set_defaults(func=cmd_worker)
+
+    integ_p = sub.add_parser(
+        "integrations", help="Show which third-party integrations are configured (reads env vars)"
+    )
+    integ_p.add_argument("--check", action="store_true", help="Also make a live API call to verify each one")
+    integ_p.add_argument(
+        "--env-template", action="store_true", help="Print every integration env var as a fill-in template"
+    )
+    integ_p.set_defaults(func=cmd_integrations)
 
     args = parser.parse_args()
     args.func(args)

@@ -1,38 +1,28 @@
 import os
 import secrets
-import time
-from collections import defaultdict, deque
 
 from flask import Flask, jsonify, redirect, render_template, request, session, url_for
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from .. import auth as google_auth
+from .. import integrations
 from .. import keystore
 from ..config import Config
 from ..mailboard import Mailboard
 from ..orchestrator import KEYED_PROVIDERS, Orchestrator, build_file_tree
 from ..providers import ProviderError
+from ..ratelimit import SlidingWindowLimiter
 
-# Simple in-memory sliding-window rate limit for turn-triggering endpoints.
-# Resets on every cold start and isn't shared across serverless instances,
-# so it's not a hard guarantee on platforms like Vercel -- but it's free,
-# dependency-free, and still meaningfully slows down abuse within one warm
-# instance, which is the realistic threat here (BYOK means callers spend
-# their own API credits, not the operator's).
+# Rate limit for turn-triggering endpoints. Per-instance only (see
+# ratelimit.py), which is enough here: BYOK means callers spend their own
+# API credits, not the operator's.
 RATE_LIMIT_WINDOW_SECONDS = 60
 RATE_LIMIT_MAX_REQUESTS = 20
-_rate_limit_buckets: dict[str, deque] = defaultdict(deque)
+_turn_limiter = SlidingWindowLimiter(RATE_LIMIT_MAX_REQUESTS, RATE_LIMIT_WINDOW_SECONDS)
 
 
 def _rate_limited(key: str) -> bool:
-    now = time.monotonic()
-    bucket = _rate_limit_buckets[key]
-    while bucket and now - bucket[0] > RATE_LIMIT_WINDOW_SECONDS:
-        bucket.popleft()
-    if len(bucket) >= RATE_LIMIT_MAX_REQUESTS:
-        return True
-    bucket.append(now)
-    return False
+    return _turn_limiter.hit(key)
 
 
 def create_app(config: Config) -> Flask:
@@ -65,6 +55,10 @@ def create_app(config: Config) -> Flask:
 
     mailboard = Mailboard(config.settings.mailboard_file)
     orchestrator = Orchestrator(config, mailboard)
+
+    # Third-party integrations (Gmail, Drive, Figma, ...) used by the public
+    # landing site, all under /api/integrations/. See integrations/__init__.py.
+    app.register_blueprint(integrations.create_blueprint())
 
     def _stored_credentials() -> dict:
         user = session.get("user")
