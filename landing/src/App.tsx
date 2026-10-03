@@ -1,4 +1,4 @@
-import { Component, useState, useEffect, useRef } from "react";
+import { Component, useState, useEffect, useRef, useSyncExternalStore } from "react";
 import type { CSSProperties, FormEvent, ReactNode } from "react";
 import { Analytics } from "@vercel/analytics/react";
 import {
@@ -654,14 +654,76 @@ function ResumeLink() {
   );
 }
 
-export default function App() {
-  const [activeAgent, setActiveAgent] = useState(0);
-  const [menuOpen, setMenuOpen] = useState(false);
+// One shared rotation drives the hero pills and the agent roster. It lives
+// outside React state so each tick re-renders only those two components,
+// not the whole page every 2.2 seconds.
+const agentRotation = (() => {
+  let index = 0;
+  const listeners = new Set<() => void>();
+  let timer: ReturnType<typeof setInterval> | null = null;
+  return {
+    subscribe(listener: () => void) {
+      listeners.add(listener);
+      timer ??= setInterval(() => {
+        index = (index + 1) % AGENTS.length;
+        listeners.forEach((l) => l());
+      }, 2200);
+      return () => {
+        listeners.delete(listener);
+        if (listeners.size === 0 && timer) {
+          clearInterval(timer);
+          timer = null;
+        }
+      };
+    },
+    get: () => index,
+  };
+})();
 
-  useEffect(() => {
-    const t = setInterval(() => setActiveAgent((a) => (a + 1) % AGENTS.length), 2200);
-    return () => clearInterval(t);
-  }, []);
+function useActiveAgent() {
+  return useSyncExternalStore(agentRotation.subscribe, agentRotation.get, agentRotation.get);
+}
+
+function AgentPills() {
+  const activeAgent = useActiveAgent();
+  return (
+    <div className="flex flex-wrap gap-3 mt-16">
+      {AGENTS.map((a, i) => (
+        <div
+          key={a.id}
+          className="flex items-center gap-2 px-3 py-2 rounded-xl border text-xs transition-all duration-300"
+          style={{
+            fontFamily: "var(--font-mono)",
+            background: activeAgent === i ? a.colorDim : "var(--color-surface)",
+            borderColor: activeAgent === i ? a.color + "66" : "var(--color-border)",
+            color: activeAgent === i ? a.color : "var(--color-muted)",
+          }}
+        >
+          <span>{a.icon}</span>
+          <span>{a.name}</span>
+          <span
+            className="w-1.5 h-1.5 rounded-full"
+            style={{ background: activeAgent === i ? a.color : "#3a3a50" }}
+          />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function AgentRoster() {
+  const activeAgent = useActiveAgent();
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      {AGENTS.map((agent, i) => (
+        <AgentCard key={agent.id} agent={agent} active={activeAgent === i} />
+      ))}
+    </div>
+  );
+}
+
+export default function App() {
+  const [menuOpen, setMenuOpen] = useState(false);
 
   return (
     <div style={{ background: "var(--color-bg)", minHeight: "100vh" }}>
@@ -845,28 +907,7 @@ export default function App() {
             </div>
           </div>
 
-          {/* Agent pills row */}
-          <div className="flex flex-wrap gap-3 mt-16">
-            {AGENTS.map((a, i) => (
-              <div
-                key={a.id}
-                className="flex items-center gap-2 px-3 py-2 rounded-xl border text-xs transition-all duration-300"
-                style={{
-                  fontFamily: "var(--font-mono)",
-                  background: activeAgent === i ? a.colorDim : "var(--color-surface)",
-                  borderColor: activeAgent === i ? a.color + "66" : "var(--color-border)",
-                  color: activeAgent === i ? a.color : "var(--color-muted)",
-                }}
-              >
-                <span>{a.icon}</span>
-                <span>{a.name}</span>
-                <span
-                  className="w-1.5 h-1.5 rounded-full"
-                  style={{ background: activeAgent === i ? a.color : "#3a3a50" }}
-                />
-              </div>
-            ))}
-          </div>
+          <AgentPills />
         </div>
       </section>
 
@@ -926,11 +967,7 @@ export default function App() {
             </p>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            {AGENTS.map((agent, i) => (
-              <AgentCard key={agent.id} agent={agent} active={activeAgent === i} />
-            ))}
-          </div>
+          <AgentRoster />
         </div>
       </section>
 
