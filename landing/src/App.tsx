@@ -81,7 +81,7 @@ const LOG_LINES = [
   { time: "09:14:02", agent: "claude", icon: "◆", color: "#6c6cff", text: "Analysing codebase structure..." },
   { time: "09:14:05", agent: "claude", icon: "◆", color: "#6c6cff", text: "Found 3 components with prop-drilling issues" },
   { time: "09:14:05", agent: "claude", icon: "◆", color: "#6c6cff", text: "Proposing context refactor in src/store.ts" },
-  { time: "09:14:07", agent: "system", icon: "→", color: "#7070a0", text: "Handing off to reviewer (ChatGPT)" },
+  { time: "09:14:07", agent: "system", icon: "→", color: "#8686b4", text: "Handing off to reviewer (ChatGPT)" },
   { time: "09:14:08", agent: "gpt", icon: "●", color: "#3ddc84", text: "Reading src/store.ts..." },
   { time: "09:14:10", agent: "gpt", icon: "●", color: "#3ddc84", text: "Writing UserContext, CartContext..." },
   { time: "09:14:14", agent: "gpt", icon: "●", color: "#3ddc84", text: "Updated 7 files, set handoff to null" },
@@ -199,7 +199,7 @@ function AgentCard({ agent, active }: { agent: typeof AGENTS[0]; active: boolean
         >
           <span
             className="w-1.5 h-1.5 rounded-full"
-            style={{ background: active ? agent.color : "#7070a0" }}
+            style={{ background: active ? agent.color : "#8686b4" }}
           />
           {active ? "active" : "ready"}
         </div>
@@ -254,6 +254,12 @@ function ContactForm() {
   // State updates are async, so a fast double-click could start two sends
   // before the button re-renders as disabled. A ref blocks it synchronously.
   const inFlight = useRef(false);
+  // The form (and the focused button) is replaced on success; move focus to
+  // the confirmation so keyboard and screen-reader users land on it.
+  const sentRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (status === "sent") sentRef.current?.focus();
+  }, [status]);
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -319,19 +325,27 @@ function ContactForm() {
   if (status === "sent") {
     return (
       <div
-        className="rounded-xl p-6 border text-sm"
+        ref={sentRef}
+        tabIndex={-1}
+        role="status"
+        className="rounded-xl p-6 border text-sm outline-none"
         style={{ borderColor: "var(--color-border)", background: "var(--color-surface)", color: "var(--color-text)" }}
       >
-        <span style={{ color: "var(--color-green)" }}>✓</span> Thanks — that's sent. I'll get back to you soon.
+        <span style={{ color: "var(--color-green)" }} aria-hidden="true">✓</span> Thanks — that's sent. I'll get back to you soon.
       </div>
     );
   }
 
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-3 max-w-md">
-      <input type="text" name="name" placeholder="First and Last Name" required style={inputStyle} />
-      <input type="email" name="email" placeholder="Email" required style={inputStyle} />
-      <textarea name="message" placeholder="What's up?" required rows={4} maxLength={5000} style={{ ...inputStyle, resize: "vertical" }} />
+      {/* Visually hidden labels: placeholders vanish while typing and aren't
+          reliably announced by screen readers. */}
+      <label htmlFor="contact-name" className="sr-only">Name</label>
+      <input id="contact-name" type="text" name="name" autoComplete="name" placeholder="First and Last Name" required style={inputStyle} />
+      <label htmlFor="contact-email" className="sr-only">Email</label>
+      <input id="contact-email" type="email" name="email" autoComplete="email" placeholder="Email" required style={inputStyle} />
+      <label htmlFor="contact-message" className="sr-only">Message</label>
+      <textarea id="contact-message" name="message" placeholder="What's up?" required rows={4} maxLength={5000} style={{ ...inputStyle, resize: "vertical" }} />
       {/* Honeypot: hidden from people and screen readers; bots fill it in and the backend drops their message. */}
       <input
         type="text"
@@ -346,7 +360,7 @@ function ContactForm() {
         disabled={status === "sending"}
         className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl font-medium text-sm transition-all duration-200 w-fit"
         style={{
-          background: "var(--color-accent)",
+          background: "var(--color-accent-strong)",
           color: "#fff",
           fontFamily: "var(--font-display)",
           opacity: status === "sending" ? 0.6 : 1,
@@ -357,7 +371,7 @@ function ContactForm() {
         {status === "sending" ? "Sending..." : "Send message"}
       </button>
       {status === "error" && (
-        <p className="text-xs" style={{ color: "#f85149" }}>
+        <p className="text-xs" role="alert" style={{ color: "#f85149" }}>
           {errorMessage}
         </p>
       )}
@@ -663,7 +677,7 @@ export default function App() {
         <div className="flex items-center gap-2.5">
           <div
             className="w-7 h-7 rounded-md flex items-center justify-center text-sm font-bold"
-            style={{ background: "var(--color-accent)", color: "#fff", fontFamily: "var(--font-mono)" }}
+            style={{ background: "var(--color-accent-strong)", color: "#fff", fontFamily: "var(--font-mono)" }}
           >
             A
           </div>
@@ -708,14 +722,18 @@ export default function App() {
             className="md:hidden"
             onClick={() => setMenuOpen(!menuOpen)}
             style={{ color: "var(--color-muted)" }}
+            aria-label={menuOpen ? "Close menu" : "Open menu"}
+            aria-expanded={menuOpen}
+            aria-controls="mobile-menu"
           >
-            {menuOpen ? "✕" : "☰"}
+            <span aria-hidden="true">{menuOpen ? "✕" : "☰"}</span>
           </button>
         </div>
       </nav>
 
       {menuOpen && (
         <div
+          id="mobile-menu"
           className="md:hidden border-b px-6 py-4 flex flex-col gap-4"
           style={{ background: "var(--color-surface)", borderColor: "var(--color-border)" }}
         >
@@ -793,7 +811,7 @@ export default function App() {
                 rel="noopener noreferrer"
                 className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl font-medium text-sm transition-all duration-200"
                 style={{
-                  background: "var(--color-accent)",
+                  background: "var(--color-accent-strong)",
                   color: "#fff",
                   fontFamily: "var(--font-display)",
                 }}
@@ -1026,7 +1044,7 @@ export default function App() {
                   rel="noopener noreferrer"
                   className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl font-medium text-sm transition-all duration-200"
                   style={{
-                    background: "var(--color-accent)",
+                    background: "var(--color-accent-strong)",
                     color: "#fff",
                     fontFamily: "var(--font-display)",
                   }}
@@ -1146,7 +1164,7 @@ export default function App() {
           <div className="flex items-center gap-2.5">
             <div
               className="w-5 h-5 rounded flex items-center justify-center text-xs font-bold"
-              style={{ background: "var(--color-accent)", color: "#fff", fontFamily: "var(--font-mono)" }}
+              style={{ background: "var(--color-accent-strong)", color: "#fff", fontFamily: "var(--font-mono)" }}
             >
               A
             </div>
