@@ -12,7 +12,7 @@ import os
 
 from flask import Blueprint, Response, current_app, jsonify, request
 
-from ..ratelimit import SlidingWindowLimiter
+from ..ratelimit import make_limiter
 from .base import Integration, IntegrationError, NotConfiguredError, Route
 
 DEFAULT_ALLOWED_ORIGIN = "https://agentbridge-site-pi.vercel.app"
@@ -70,7 +70,7 @@ def create_blueprint(integrations: list[Integration]) -> Blueprint:
 
 
 def _make_view(integ: Integration, route: Route):
-    limiter = SlidingWindowLimiter(*route.rate_limit) if route.rate_limit else None
+    limiter = make_limiter(f"integration:{integ.name}{route.path}", *route.rate_limit) if route.rate_limit else None
 
     def view(**kwargs):
         if limiter and limiter.hit(f"{request.remote_addr}"):

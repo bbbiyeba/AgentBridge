@@ -265,6 +265,15 @@ keys (the default) never touch your server's storage at all.
 
 Redeploy after setting these. The "Sign in with Google" link appears automatically once `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` are set — nothing to change in `config.yaml`. Without Upstash configured, saved keys just won't persist even if login works; without Google configured, the whole feature stays hidden and everything behaves exactly as before.
 
+### Optional: shared rate limits and provider timeouts
+
+Two environment variables matter mostly on serverless hosts like Vercel:
+
+| Variable | What it does |
+|---|---|
+| `RATE_LIMIT_STORE=upstash` | Counts rate limits in Upstash Redis, so every server instance shares one count per visitor. By default each instance counts on its own, so the effective limit is "N per instance" and resets on every cold start. It uses the same `UPSTASH_REDIS_REST_URL`/`TOKEN` as saved keys. If Upstash is unreachable it falls back to per-instance limits (logged) rather than blocking requests. |
+| `PROVIDER_TIMEOUT_SECONDS` | How long to wait for Anthropic, OpenAI or Ollama before giving up. The defaults are 120 s, and 300 s for Ollama. Set it a little below your host's request time limit, so a slow reply ends with a clear "didn't respond" message instead of the platform cutting the request off. |
+
 ## Site integrations (Gmail, Google Drive, Figma, GitHub, Calendly)
 
 The public landing site can use a few third-party services through this
@@ -474,8 +483,9 @@ agentbridge/
   worker.py          Local worker: runs a turn's provider call on your own machine
   auth.py            Optional "Sign in with Google" (see README section below)
   keystore.py        Optional encrypted per-user key storage (Upstash Redis)
+  upstash.py         Minimal Upstash Redis REST client (keystore + shared rate limits)
   integrations/      Gmail / Drive / Figma / GitHub / Calendly for the landing site (see "Site integrations")
-  ratelimit.py       Shared in-memory per-IP rate limiter
+  ratelimit.py       Per-IP rate limiting (in-memory, or shared via Upstash)
   config.py          Loads config.yaml into AgentConfig/Settings
   mailboard.py       mailboard.json ledger read/write
   orchestrator.py    The turn loop: prompt building, response parsing, applying writes

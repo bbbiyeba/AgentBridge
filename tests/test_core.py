@@ -185,11 +185,25 @@ class OrchestratorTests(TmpDirCase):
     def test_file_contents_skips_binary_and_notes_over_budget(self):
         (self.ws / "img.bin").write_bytes(b"\xff\xd8\xff\x00")
         (self.ws / "big.txt").write_text("x" * 50)
-        (self.ws / ".secret").write_text("hidden")
         out = build_file_contents(self.ws, budget=20)
         self.assertIn("img.bin (binary)", out)
         self.assertIn("big.txt (50 chars, over the context budget)", out)
-        self.assertNotIn("hidden", out)
+
+    def test_agent_written_dotfiles_are_visible_but_tooling_dirs_are_not(self):
+        from agentbridge.orchestrator import build_file_tree
+
+        self.orch.apply_turn("architect", "m", [{"path": ".gitignore", "content": "dist/\n"}], None)
+        (self.ws / ".git").mkdir()
+        (self.ws / ".git" / "HEAD").write_text("ref: refs/heads/main")
+        (self.ws / "node_modules" / "pkg").mkdir(parents=True)
+        (self.ws / "node_modules" / "pkg" / "index.js").write_text("x")
+        tree = build_file_tree(self.ws)
+        prompt = self.orch.prepare_turn("reviewer")["user_prompt"]
+        self.assertIn(".gitignore", tree)
+        self.assertIn('<file path=".gitignore">\ndist/', prompt)
+        for noise in (".git/", "HEAD", "node_modules", "refs/heads"):
+            self.assertNotIn(noise, tree)
+            self.assertNotIn(noise, prompt)
 
     def test_take_turn_requires_client_key_when_configured(self):
         with self.assertRaisesRegex(ValueError, "requires your own anthropic API key"):
@@ -512,3 +526,222 @@ class ConfigTests(TmpDirCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# --------------------------------------------------------------------------- #
+# Shared (Upstash) rate limiting
+# --------------------------------------------------------------------------- #
+class FakeUpstashPipeline:
+    """Just enough of Upstash's REST API: POST /pipeline with INCR/EXPIRE."""
+
+    def __init__(self):
+        self.counts = {}
+        self.calls = 0
+
+    def __call__(self, req, timeout=None):
+        assert req.full_url.endswith("/pipeline"), req.full_url
+        self.calls += 1
+        out = []
+        for cmd in json.loads(req.data):
+            if cmd[0] == "INCR":
+                self.counts[cmd[1]] = self.counts.get(cmd[1], 0) + 1
+                out.append({"result": self.counts[cmd[1]]})
+            else:
+                out.append({"result": 1})
+        return FakeResp(out)
+
+
+class SharedLimiterTests(unittest.TestCase):
+    ENV = {"RATE_LIMIT_STORE": "upstash", "UPSTASH_REDIS_REST_URL": "https://r", "UPSTASH_REDIS_REST_TOKEN": "t"}
+
+    def test_two_instances_share_one_count(self):
+        from agentbridge.ratelimit import make_limiter
+
+        fake = FakeUpstashPipeline()
+        with mock.patch.dict(os.environ, self.ENV), mock.patch("urllib.request.urlopen", fake):
+            server_a, server_b = make_limiter("task", 3, 60), make_limiter("task", 3, 60)
+            results = [server_a.hit("1.2.3.4"), server_b.hit("1.2.3.4"), server_a.hit("1.2.3.4"), server_b.hit("1.2.3.4")]
+            self.assertFalse(make_limiter("task", 3, 60).hit("5.6.7.8"))  # other clients unaffected
+        self.assertEqual(results, [False, False, False, True])
+
+    def test_off_by_default_and_fails_open_to_local_limits(self):
+        from agentbridge.ratelimit import make_limiter
+
+        with mock.patch.dict(os.environ, {"UPSTASH_REDIS_REST_URL": "https://r", "UPSTASH_REDIS_REST_TOKEN": "t"}), \
+             mock.patch("urllib.request.urlopen", side_effect=AssertionError("must not call Upstash")):
+            self.assertFalse(make_limiter("x", 1, 60).hit("ip"))
+        from agentbridge.ratelimit import SharedLimiter
+
+        SharedLimiter._last_warning = 0.0  # the once-a-minute log throttle is class-wide
+        with mock.patch.dict(os.environ, self.ENV), mock.patch("urllib.request.urlopen", side_effect=TimeoutError()):
+            limiter = make_limiter("x", 2, 60)
+            with self.assertLogs(level="WARNING"):
+                results = [limiter.hit("ip") for _ in range(3)]
+        self.assertEqual(results, [False, False, True])
+
+
+class ProviderConfigTests(unittest.TestCase):
+    def capture(self, provider, reply, credential="k"):
+        seen = {}
+
+        def fake(req, timeout=None):
+            seen["timeout"] = timeout
+            seen["body"] = json.loads(req.data)
+            return FakeResp(reply)
+
+        with mock.patch("urllib.request.urlopen", fake):
+            provider.chat("m", "s", [{"role": "user", "content": "u"}], credential=credential)
+        return seen
+
+    OPENAI_OK = {"choices": [{"finish_reason": "stop", "message": {"content": "{}"}}]}
+
+    def test_timeout_override_applies_to_every_provider(self):
+        from agentbridge.providers import ollama_provider
+
+        with mock.patch.dict(os.environ, {"PROVIDER_TIMEOUT_SECONDS": "55"}):
+            self.assertEqual(self.capture(openai_provider, self.OPENAI_OK)["timeout"], 55)
+            self.assertEqual(self.capture(ollama_provider, self.OLLAMA_OK, self.OLLAMA_HOST)["timeout"], 55)
+        with mock.patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(self.capture(ollama_provider, self.OLLAMA_OK, self.OLLAMA_HOST)["timeout"], 300)
+
+    OLLAMA_OK = {"message": {"content": "{}"}}
+    OLLAMA_HOST = "http://localhost:11434"
+
+    def test_ollama_host_without_scheme_is_a_provider_error(self):
+        from agentbridge.providers import ollama_provider
+
+        # No scheme at all fails while building the request...
+        with self.assertRaisesRegex(ProviderError, "Invalid provider URL"):
+            ollama_provider.chat("llama3", "s", [], credential="ollama-box")
+        # ...while "localhost:11434" parses as an unknown scheme and fails on connect.
+        with self.assertRaisesRegex(ProviderError, "Could not reach"):
+            ollama_provider.chat("llama3", "s", [], credential="localhost:11434")
+
+    def test_bad_timeout_setting_is_a_clear_error(self):
+        for bad in ("2m", "0", "-5"):
+            with mock.patch.dict(os.environ, {"PROVIDER_TIMEOUT_SECONDS": bad}), self.assertRaises(ProviderError):
+                self.capture(openai_provider, self.OPENAI_OK)
+
+    def test_openai_output_is_capped(self):
+        body = self.capture(openai_provider, self.OPENAI_OK)["body"]
+        self.assertEqual(body["max_completion_tokens"], openai_provider.MAX_COMPLETION_TOKENS)
+        self.assertNotIn("max_tokens", body)
+
+
+# --------------------------------------------------------------------------- #
+# Worker polling loop and CLI
+# --------------------------------------------------------------------------- #
+class _Stop(Exception):
+    pass
+
+
+class WorkerWatchTests(unittest.TestCase):
+    def test_watch_survives_errors_waits_its_turn_and_runs_it(self):
+        states = [
+            worker.WorkerError("server down"),                     # transient failure: logged, keeps polling
+            {"next_agent": "reviewer", "entries": [{}], "agents": [{"name": "architect"}]},  # not my turn
+            {"next_agent": "architect", "entries": [{}], "agents": [{"name": "architect"}]},  # my turn
+            _Stop(),
+        ]
+        ran = []
+        with mock.patch.object(worker, "_get", side_effect=states), \
+             mock.patch.object(worker, "run_one_turn", side_effect=lambda s, a: ran.append(a) or {"id": 7, "message": "m", "files": []}), \
+             mock.patch.object(worker.time, "sleep") as sleep, \
+             mock.patch("sys.stdout", new_callable=io.StringIO) as out, \
+             mock.patch("sys.stderr", new_callable=io.StringIO) as err:
+            with self.assertRaises(_Stop):
+                worker.watch("http://h/", "architect", poll_interval=3)
+        self.assertEqual(ran, ["architect"])
+        self.assertIn("server down", err.getvalue())
+        self.assertIn("[7] ran turn", out.getvalue())
+        self.assertEqual([c.args[0] for c in sleep.call_args_list], [3, 3])
+
+    def test_first_agent_goes_first_on_an_empty_ledger(self):
+        states = [{"next_agent": None, "entries": [], "agents": [{"name": "architect"}]}, _Stop()]
+        with mock.patch.object(worker, "_get", side_effect=states), \
+             mock.patch.object(worker, "run_one_turn", side_effect=worker.WorkerError("provider down")) as run, \
+             mock.patch.object(worker.time, "sleep"), mock.patch("sys.stdout", new_callable=io.StringIO), \
+             mock.patch("sys.stderr", new_callable=io.StringIO) as err:
+            with self.assertRaises(_Stop):
+                worker.watch("http://h", "architect", poll_interval=1)
+        run.assert_called_once()
+        self.assertIn("turn failed: provider down", err.getvalue())
+
+
+class CliTests(TmpDirCase):
+    def run_cli(self, *argv, env=None):
+        from agentbridge.__main__ import main
+
+        code = 0
+        with mock.patch("sys.argv", ["agentbridge", *argv]), mock.patch.dict(os.environ, env or {}, clear=True), \
+             mock.patch("sys.stdout", new_callable=io.StringIO) as out, mock.patch("sys.stderr", new_callable=io.StringIO) as err:
+            try:
+                main()
+            except SystemExit as e:
+                code = e.code or 0
+        return code, out.getvalue(), err.getvalue()
+
+    def write_config(self):
+        path = self.tmp / "config.yaml"
+        path.write_text(
+            "agents:\n  - {name: architect, provider: anthropic, model: m, role: r}\n"
+            f"settings:\n  workspace_dir: {self.tmp / 'ws'}\n  mailboard_file: {self.tmp / 'mb.json'}\n"
+        )
+        return str(path)
+
+    def test_integrations_status_hides_secrets(self):
+        code, out, _ = self.run_cli("integrations", env={"GITHUB_USERNAME": "bbbiyeba", "FIGMA_TOKEN": "figd_secret"})
+        self.assertEqual(code, 0)
+        self.assertIn("GitHub [github]: configured", out)
+        self.assertIn("bbbiyeba", out)
+        self.assertNotIn("figd_secret", out)
+        self.assertIn("FIGMA_FILE_KEY                 MISSING", out)
+
+    def test_integrations_env_template_lists_every_setting(self):
+        from agentbridge.integrations import REGISTRY
+
+        _, out, _ = self.run_cli("integrations", "--env-template")
+        for cls in REGISTRY.values():
+            for setting in cls.settings:
+                self.assertIn(f"{setting.env}=", out)
+
+    def test_integrations_check_exit_code_reflects_failures(self):
+        ok = lambda req, timeout=None: FakeResp(  # noqa: E731
+            {"login": "bbbiyeba", "public_repos": 3} if "/users/" in req.full_url else {"rate": {"remaining": 59, "limit": 60}}
+        )
+        with mock.patch("urllib.request.urlopen", ok):
+            code, out, _ = self.run_cli("integrations", "--check", env={"GITHUB_USERNAME": "bbbiyeba"})
+        self.assertEqual(code, 0)
+        self.assertIn("live check: OK - found bbbiyeba", out)
+        with mock.patch("urllib.request.urlopen", side_effect=http_error(404, b"{}")):
+            code, out, _ = self.run_cli("integrations", "--check", env={"GITHUB_USERNAME": "nobody"})
+        self.assertEqual(code, 1)
+        self.assertIn("live check: FAILED", out)
+
+    def test_run_requires_a_task_then_runs_turns(self):
+        cfg = self.write_config()
+        code, _, err = self.run_cli("--config", cfg, "run")
+        self.assertEqual(code, 1)
+        self.assertIn("No task set", err)
+        reply = json.dumps({"message": "wrote it", "files": [{"path": "a.txt", "content": "x"}], "handoff": None})
+        with mock.patch("agentbridge.orchestrator.chat", return_value=reply):
+            code, out, _ = self.run_cli("--config", cfg, "run", "--task", "make a.txt", "--turns", "3")
+        self.assertEqual(code, 0)
+        self.assertIn("[1] architect: wrote it", out)
+        self.assertIn("created: a.txt", out)
+        self.assertEqual((self.tmp / "ws" / "a.txt").read_text(), "x")
+
+    def test_worker_once_reports_errors_with_exit_code(self):
+        with mock.patch("agentbridge.worker.run_one_turn", return_value={"id": 4, "message": "done", "files": []}):
+            code, out, _ = self.run_cli("worker", "--server", "http://h", "--agent", "architect", "--once")
+        self.assertEqual((code, "[4] ran turn: done" in out), (0, True))
+        with mock.patch("agentbridge.worker.run_one_turn", side_effect=worker.WorkerError("no key")):
+            code, _, err = self.run_cli("worker", "--server", "http://h", "--agent", "architect", "--once")
+        self.assertEqual((code, "Error: no key" in err), (1, True))
+
+    def test_web_builds_the_app_from_the_given_config(self):
+        cfg = self.write_config()
+        with mock.patch("flask.Flask.run") as run:
+            code, _, _ = self.run_cli("--config", cfg, "web", "--port", "5099")
+        self.assertEqual(code, 0)
+        self.assertEqual(run.call_args.kwargs["port"], 5099)
