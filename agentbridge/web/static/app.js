@@ -184,7 +184,8 @@ function currentCredentials() {
 
 function escapeHtml(s) {
   // String(): ledger fields come from AI output, so never assume their type.
-  return String(s ?? "")
+  const text = s !== null && typeof s === "object" ? JSON.stringify(s) : String(s ?? "");
+  return text
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")

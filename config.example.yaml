@@ -33,6 +33,10 @@ settings:
   mailboard_file: mailboard.json
   max_ledger_context: 6
   max_turns: 20
+  # How many characters of workspace file content each agent sees per turn
+  # (recently changed files first). Raise it for bigger projects; it's sent
+  # as prompt tokens on every turn, so it costs more.
+  max_file_context_chars: 60000
 
   # If you're only running this locally for yourself, leave this false and
   # set ANTHROPIC_API_KEY / OPENAI_API_KEY as env vars as usual.
