@@ -7,11 +7,13 @@ non-secret prompt (fetched from the server) and the non-secret result
 key itself never does.
 """
 
+import http.client
 import json
 import os
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 from .orchestrator import parse_response
@@ -29,15 +31,29 @@ class WorkerError(RuntimeError):
     running a turn locally."""
 
 
-def _get(url: str) -> dict:
+def _request(req: urllib.request.Request | str, timeout: float) -> dict:
+    url = req.full_url if isinstance(req, urllib.request.Request) else req
     try:
-        with urllib.request.urlopen(url, timeout=30) as resp:
-            return json.loads(resp.read().decode("utf-8"))
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            raw = resp.read()
     except urllib.error.HTTPError as e:
         detail = e.read().decode("utf-8", errors="replace")
         raise WorkerError(f"{url} returned HTTP {e.code}: {detail}") from e
-    except urllib.error.URLError as e:
-        raise WorkerError(f"Could not reach {url}: {e.reason}") from e
+    except TimeoutError as e:
+        raise WorkerError(f"{url} didn't respond within {timeout}s") from e
+    except (OSError, http.client.HTTPException, ValueError) as e:
+        # URLError, dropped connections, and urllib's ValueError/InvalidURL
+        # for a malformed --server -- all reported, none crash watch().
+        raise WorkerError(f"Could not reach {url}: {getattr(e, 'reason', e)}") from e
+    try:
+        return json.loads(raw.decode("utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError) as e:
+        # e.g. a login wall or platform error page served with HTTP 200
+        raise WorkerError(f"{url} returned a page that isn't JSON -- is --server pointing at AgentBridge?") from e
+
+
+def _get(url: str) -> dict:
+    return _request(url, timeout=30)
 
 
 def _post(url: str, payload: dict) -> dict:
@@ -51,14 +67,7 @@ def _post(url: str, payload: dict) -> dict:
         headers=headers,
         method="POST",
     )
-    try:
-        with urllib.request.urlopen(req, timeout=180) as resp:
-            return json.loads(resp.read().decode("utf-8"))
-    except urllib.error.HTTPError as e:
-        detail = e.read().decode("utf-8", errors="replace")
-        raise WorkerError(f"{url} returned HTTP {e.code}: {detail}") from e
-    except urllib.error.URLError as e:
-        raise WorkerError(f"Could not reach {url}: {e.reason}") from e
+    return _request(req, timeout=180)
 
 
 def credential_for(provider: str) -> str | None:
@@ -68,7 +77,9 @@ def credential_for(provider: str) -> str | None:
 
 def run_one_turn(server: str, agent_name: str) -> dict:
     server = server.rstrip("/")
-    prepared = _get(f"{server}/api/turn/prepare?agent={agent_name}")
+    # Encoded: a name with a space, & or # would otherwise crash or
+    # silently ask for a different agent.
+    prepared = _get(f"{server}/api/turn/prepare?{urllib.parse.urlencode({'agent': agent_name})}")
     if not prepared.get("ok"):
         raise WorkerError(prepared.get("error", "prepare failed"))
 
@@ -113,7 +124,7 @@ def run_one_turn(server: str, agent_name: str) -> dict:
 def watch(server: str, agent_name: str, poll_interval: float) -> None:
     server = server.rstrip("/")
     print(f"Watching {server} — will act as '{agent_name}' whenever it's that agent's turn.")
-    print(f"({CREDENTIAL_ENV.get(agent_name, '')} never leaves this machine.) Ctrl+C to stop.\n")
+    print("(Your provider API key is read from this machine's environment and never leaves it.) Ctrl+C to stop.\n")
 
     while True:
         try:
