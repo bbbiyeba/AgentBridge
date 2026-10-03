@@ -3,7 +3,8 @@ __pycache__/
 .venv/
 venv/
 .env
-.claude/
+.claude/*
+!.claude/settings.json
 
 # Local config (copy config.example.yaml -> config.yaml)
 config.yaml
