@@ -1,6 +1,6 @@
 import os
 
-from .http import ProviderError, post_json
+from .http import ProviderError, post_json, provider_timeout
 
 API_URL = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_VERSION = "2023-06-01"
@@ -25,7 +25,7 @@ def chat(model: str, system: str, messages: list[dict], credential: str | None =
         "x-api-key": api_key,
         "anthropic-version": ANTHROPIC_VERSION,
     }
-    data = post_json(API_URL, body, headers)
+    data = post_json(API_URL, body, headers, timeout=provider_timeout(120))
     stop_reason = data.get("stop_reason")
     if stop_reason == "max_tokens":
         raise ProviderError(

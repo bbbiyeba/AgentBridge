@@ -8,15 +8,14 @@ dump of the Redis database doesn't hand over plaintext API keys.
 
 import base64
 import hashlib
-import http.client
 import json
 import logging
 import os
 import time
-import urllib.error
-import urllib.request
 
 from cryptography.fernet import Fernet, InvalidToken
+
+from . import upstash
 
 ALLOWED_PROVIDERS = ("anthropic", "openai")
 
@@ -27,16 +26,8 @@ class KeystoreError(RuntimeError):
     pass
 
 
-def _redis_config() -> tuple[str, str] | None:
-    url = os.environ.get("UPSTASH_REDIS_REST_URL")
-    token = os.environ.get("UPSTASH_REDIS_REST_TOKEN")
-    if not url or not token:
-        return None
-    return url.rstrip("/"), token
-
-
 def is_configured() -> bool:
-    return _redis_config() is not None and bool(os.environ.get("KEY_ENCRYPTION_SECRET"))
+    return upstash.is_configured() and bool(os.environ.get("KEY_ENCRYPTION_SECRET"))
 
 
 def _fernet() -> Fernet:
@@ -50,33 +41,10 @@ def _fernet() -> Fernet:
 
 
 def _redis_command(command: list) -> dict:
-    config = _redis_config()
-    if not config:
-        raise KeystoreError("Upstash Redis is not configured (UPSTASH_REDIS_REST_URL/TOKEN)")
-    url, token = config
-    req = urllib.request.Request(
-        url,
-        data=json.dumps(command).encode("utf-8"),
-        headers={"Authorization": f"Bearer {token}", "content-type": "application/json"},
-        method="POST",
-    )
     try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            result = json.loads(resp.read().decode("utf-8"))
-    except urllib.error.HTTPError as e:
-        detail = e.read().decode("utf-8", errors="replace")
-        raise KeystoreError(f"Upstash returned HTTP {e.code}: {detail}") from e
-    except (OSError, http.client.HTTPException) as e:
-        # URLError (can't connect) is an OSError; so are a read timeout and
-        # a connection dropped mid-response, which URLError doesn't cover.
-        raise KeystoreError(f"Could not reach Upstash: {getattr(e, 'reason', e)}") from e
-    except (json.JSONDecodeError, UnicodeDecodeError) as e:
-        raise KeystoreError("Upstash returned a response that isn't JSON") from e
-    # Upstash reports command errors (bad token scope, wrong type) inside
-    # an HTTP 200 body; without this they'd read as "no saved keys".
-    if not isinstance(result, dict) or result.get("error"):
-        raise KeystoreError(f"Upstash error: {result.get('error') if isinstance(result, dict) else result}")
-    return result
+        return upstash.command(command)
+    except upstash.UpstashError as e:
+        raise KeystoreError(str(e)) from e
 
 
 def _redis_key(user_id: str) -> str:

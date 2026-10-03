@@ -2,6 +2,7 @@
 
 import http.client
 import json
+import os
 import urllib.error
 import urllib.request
 
@@ -10,13 +11,34 @@ class ProviderError(RuntimeError):
     """Raised when a provider HTTP call fails or returns something unexpected."""
 
 
-def post_json(url: str, body: dict, headers: dict, timeout: int = 120) -> dict:
-    req = urllib.request.Request(
-        url,
-        data=json.dumps(body).encode("utf-8"),
-        headers={"content-type": "application/json", **headers},
-        method="POST",
-    )
+def provider_timeout(default: float) -> float:
+    """PROVIDER_TIMEOUT_SECONDS, if set, overrides every provider's default.
+    Set it a little below your host's request limit (Vercel's function
+    max duration, say) so a slow model reply fails with a clear "didn't
+    respond" error instead of the platform killing the request mid-turn."""
+    raw = os.environ.get("PROVIDER_TIMEOUT_SECONDS", "").strip()
+    if not raw:
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        raise ProviderError(f"PROVIDER_TIMEOUT_SECONDS must be a number of seconds, got {raw!r}") from None
+    if value <= 0:
+        raise ProviderError("PROVIDER_TIMEOUT_SECONDS must be greater than 0")
+    return value
+
+
+def post_json(url: str, body: dict, headers: dict, timeout: float = 120) -> dict:
+    try:
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(body).encode("utf-8"),
+            headers={"content-type": "application/json", **headers},
+            method="POST",
+        )
+    except ValueError as e:
+        # e.g. OLLAMA_HOST set to "localhost:11434" without http://
+        raise ProviderError(f"Invalid provider URL {url!r}: {e}") from e
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             raw = resp.read()

@@ -34,12 +34,22 @@ If you have nothing to change, return an empty "files" list.
 """
 
 
+# Directories that are tooling noise, not project files. Everything else is
+# listed -- including dotfiles an agent wrote (.gitignore, .env.example),
+# which other agents previously couldn't see but /api/file still served.
+IGNORED_DIRS = {".git", "node_modules", "__pycache__", ".venv", "venv", ".mypy_cache", ".pytest_cache"}
+
+
+def _ignored(rel_parts: tuple[str, ...]) -> bool:
+    return any(part in IGNORED_DIRS for part in rel_parts)
+
+
 def build_file_tree(root: Path, max_entries: int = 200) -> str:
     root = Path(root)
     lines: list[str] = []
     for path in sorted(root.rglob("*")):
         rel_parts = path.relative_to(root).parts
-        if any(part.startswith(".") for part in rel_parts):
+        if _ignored(rel_parts):
             continue
         rel = path.relative_to(root).as_posix()
         if path.is_dir():
@@ -56,7 +66,7 @@ def _visible_files(root: Path) -> list[Path]:
     return [
         p
         for p in sorted(root.rglob("*"))
-        if p.is_file() and not any(part.startswith(".") for part in p.relative_to(root).parts)
+        if p.is_file() and not _ignored(p.relative_to(root).parts)
     ]
 
 

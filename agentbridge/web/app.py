@@ -12,19 +12,19 @@ from ..config import Config
 from ..mailboard import Mailboard
 from ..orchestrator import KEYED_PROVIDERS, Orchestrator, build_file_tree
 from ..providers import ProviderError
-from ..ratelimit import SlidingWindowLimiter
+from ..ratelimit import make_limiter
 
-# Rate limit for turn-triggering endpoints. Per-instance only (see
-# ratelimit.py), which is enough here: BYOK means callers spend their own
-# API credits, not the operator's.
+# Rate limit for turn-triggering endpoints. Per-instance unless
+# RATE_LIMIT_STORE=upstash (see ratelimit.py); BYOK means callers spend
+# their own API credits, not the operator's, so per-instance is tolerable.
 RATE_LIMIT_WINDOW_SECONDS = 60
 RATE_LIMIT_MAX_REQUESTS = 20
-_turn_limiter = SlidingWindowLimiter(RATE_LIMIT_MAX_REQUESTS, RATE_LIMIT_WINDOW_SECONDS)
+_turn_limiter = make_limiter("turn", RATE_LIMIT_MAX_REQUESTS, RATE_LIMIT_WINDOW_SECONDS)
 # Rewriting the shared task is cheap for an attacker and costly for the next
 # visitor (who runs it on their own key), so it gets a tighter limit.
-_task_limiter = SlidingWindowLimiter(10, 60)
+_task_limiter = make_limiter("task", 10, 60)
 # Everything else that does real work (file reads, prompt building, keystore).
-_misc_limiter = SlidingWindowLimiter(120, 60)
+_misc_limiter = make_limiter("misc", 120, 60)
 
 MAX_TASK_CHARS = 20_000
 MAX_SAVED_KEY_CHARS = 300
@@ -120,7 +120,7 @@ def create_app(config: Config) -> Flask:
             resp.headers.setdefault("Content-Security-Policy", DASHBOARD_CSP)
         return resp
 
-    def _limited(limiter: SlidingWindowLimiter, name: str):
+    def _limited(limiter, name: str):
         if limiter.hit(f"{name}:{request.remote_addr}"):
             return jsonify({"ok": False, "error": "rate limit exceeded, try again shortly"}), 429
         return None
