@@ -13,7 +13,7 @@ from email.headerregistry import Address
 from email.message import EmailMessage
 from email.utils import formatdate
 
-from flask import request
+from flask import current_app, request
 
 from . import google, http
 from .base import Integration, IntegrationError, Route, Setting
@@ -66,6 +66,9 @@ class GmailIntegration(Integration):
         # input; real visitors leave it blank. Pretend success so the bot
         # doesn't learn it was caught.
         if str(body.get("website") or "").strip():
+            # Logged so a real visitor whose password manager filled the
+            # hidden field (rare, but it happens) shows up somewhere.
+            current_app.logger.info("contact form honeypot triggered from %s; message dropped", request.remote_addr)
             return {"sent": True}
         name = _clean_line(body.get("name"), "name", MAX_NAME)
         email = _normalize_email(_clean_line(body.get("email"), "email", MAX_EMAIL))

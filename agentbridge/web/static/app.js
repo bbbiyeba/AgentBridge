@@ -260,6 +260,8 @@ async function refresh() {
     const state = await api("/api/state");
     if (!state.ok) throw new Error(state.error);
     if (!turnInFlight) statusDot.className = "dot ok";
+    const banner = document.getElementById("ephemeral-banner");
+    if (banner) banner.hidden = !state.ephemeral_storage;
 
     if (!taskDirty) taskInput.value = state.task || "";
     fileTree.textContent = state.file_tree || "(workspace is an empty canvas, or just empty)";
