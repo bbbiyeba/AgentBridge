@@ -50,7 +50,7 @@ class FigmaIntegration(Integration):
     @property
     def cache(self) -> TTLCache:
         if self._cache is None:
-            self._cache = TTLCache(float(self.get("FIGMA_CACHE_SECONDS") or 3600))
+            self._cache = TTLCache(self.number("FIGMA_CACHE_SECONDS"))
         return self._cache
 
     def routes(self) -> list[Route]:

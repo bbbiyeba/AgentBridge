@@ -89,6 +89,18 @@ class Integration:
             raise NotConfiguredError(self.title, [env])
         return value
 
+    def number(self, env: str) -> float:
+        """A numeric setting, with a clear error for a typo like "5m"."""
+        value = self.get(env)
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            raise IntegrationError(
+                f"{self.title} is misconfigured on this server",
+                status=500,
+                detail=f"{env} must be a number of seconds, got {value!r}",
+            ) from None
+
     def missing(self) -> list[str]:
         return [s.env for s in self.settings if s.required and not self.get(s.env)]
 

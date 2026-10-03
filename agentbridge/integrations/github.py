@@ -54,7 +54,7 @@ class GitHubIntegration(Integration):
     @property
     def cache(self) -> TTLCache:
         if self._cache is None:
-            self._cache = TTLCache(float(self.get("GITHUB_CACHE_SECONDS") or 600))
+            self._cache = TTLCache(self.number("GITHUB_CACHE_SECONDS"))
         return self._cache
 
     def routes(self) -> list[Route]:

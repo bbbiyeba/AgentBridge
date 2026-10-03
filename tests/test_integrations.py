@@ -250,6 +250,29 @@ class DriveTests(IntegrationTestCase):
         self.assertEqual(resp.status_code, 502)
         self.assertNotIn("secret internal detail", resp.get_data(as_text=True))
 
+    def test_dropped_connection_is_retried_then_reported_cleanly(self):
+        import http.client
+
+        drops = []
+
+        def drop(c):
+            drops.append(1)
+            raise http.client.RemoteDisconnected("Remote end closed connection")
+
+        self.upstream.on("GET", "https://www.googleapis.com/drive/v3/files/FILE1", drop)
+        resp = self.client.get("/api/integrations/drive/files/resume/meta")
+        self.assertEqual(len(drops), 3)  # first try + 2 retries
+        self.assertEqual(resp.status_code, 504)
+        self.assertEqual(resp.get_json()["error"], "Could not reach Google Drive")
+
+    def test_non_numeric_cache_setting_is_a_clear_misconfiguration(self):
+        with mock.patch.dict(os.environ, {"DRIVE_CACHE_SECONDS": "5m"}):
+            with self.assertLogs(level="WARNING") as logs:
+                resp = self.client.get("/api/integrations/drive/files/resume")
+        self.assertEqual(resp.status_code, 500)
+        self.assertEqual(resp.get_json()["error"], "Google Drive is misconfigured on this server")
+        self.assertIn("DRIVE_CACHE_SECONDS must be a number", "\n".join(logs.output))
+
     def test_transient_errors_are_retried(self):
         attempts = []
 

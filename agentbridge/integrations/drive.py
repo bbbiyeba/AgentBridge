@@ -58,7 +58,7 @@ class DriveIntegration(Integration):
     @property
     def cache(self) -> TTLCache:
         if self._cache is None:
-            self._cache = TTLCache(float(self.get("DRIVE_CACHE_SECONDS") or 300))
+            self._cache = TTLCache(self.number("DRIVE_CACHE_SECONDS"))
         return self._cache
 
     def files(self) -> dict[str, str]:

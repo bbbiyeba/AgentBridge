@@ -6,6 +6,7 @@ service, instead of each integration growing its own slightly different
 copy of urllib boilerplate.
 """
 
+import http.client
 import json
 import time
 import urllib.error
@@ -88,7 +89,10 @@ def request(
                 status=_status_for(code),
                 detail=f"{method} {_redact(url)} -> HTTP {e.code}: {detail}",
             ) from e
-        except (urllib.error.URLError, TimeoutError) as e:
+        # URLError covers failing to connect; a connection dropped mid-response
+        # surfaces as a bare OSError (ConnectionResetError, RemoteDisconnected)
+        # or http.client.IncompleteRead instead. All are transient: retry.
+        except (OSError, http.client.HTTPException) as e:
             if attempt < retries:
                 attempt += 1
                 time.sleep(_backoff(attempt, None))
