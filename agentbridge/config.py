@@ -19,6 +19,9 @@ class Settings:
     max_ledger_context: int
     max_turns: int
     require_client_keys: bool
+    # How much workspace file content (in characters) goes into each turn's
+    # prompt, so agents edit the code that's actually there.
+    max_file_context_chars: int = 60_000
 
 
 @dataclass
@@ -57,5 +60,6 @@ def load_config(path: str | Path = "config.yaml") -> Config:
         max_ledger_context=int(settings_raw.get("max_ledger_context", 6)),
         max_turns=int(settings_raw.get("max_turns", 20)),
         require_client_keys=bool(settings_raw.get("require_client_keys", False)),
+        max_file_context_chars=int(settings_raw.get("max_file_context_chars", 60_000)),
     )
     return Config(agents=agents, settings=settings)

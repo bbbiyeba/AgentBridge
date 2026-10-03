@@ -152,6 +152,7 @@ button:disabled { opacity: 0.45; cursor: default; }
   margin-left: 4px;
 }
 .inline-note.show { opacity: 1; }
+.inline-note.err { color: var(--del); }
 
 .panel-note { color: var(--muted); font-size: 12px; margin-top: 0; }
 
