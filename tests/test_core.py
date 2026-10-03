@@ -572,12 +572,22 @@ class SharedLimiterTests(unittest.TestCase):
             self.assertFalse(make_limiter("x", 1, 60).hit("ip"))
         from agentbridge.ratelimit import SharedLimiter
 
-        SharedLimiter._last_warning = 0.0  # the once-a-minute log throttle is class-wide
+        SharedLimiter._last_warning = None  # the once-a-minute log throttle is class-wide
         with mock.patch.dict(os.environ, self.ENV), mock.patch("urllib.request.urlopen", side_effect=TimeoutError()):
             limiter = make_limiter("x", 2, 60)
             with self.assertLogs(level="WARNING"):
                 results = [limiter.hit("ip") for _ in range(3)]
         self.assertEqual(results, [False, False, True])
+
+    def test_first_failure_is_logged_even_right_after_boot(self):
+        from agentbridge.ratelimit import SharedLimiter, make_limiter
+
+        SharedLimiter._last_warning = None
+        # A cold-started instance: the monotonic clock is still near zero.
+        with mock.patch.dict(os.environ, self.ENV), mock.patch("urllib.request.urlopen", side_effect=TimeoutError()), \
+             mock.patch("agentbridge.ratelimit.time.monotonic", return_value=5.0):
+            with self.assertLogs(level="WARNING"):
+                make_limiter("x", 2, 60).hit("ip")
 
 
 class ProviderConfigTests(unittest.TestCase):

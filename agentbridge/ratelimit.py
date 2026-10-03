@@ -61,7 +61,11 @@ class SharedLimiter:
     can admit up to 2x the limit across a window boundary -- an accepted
     trade for one round trip per request and no cleanup."""
 
-    _last_warning = 0.0  # class-wide, so an outage logs about once a minute
+    # Class-wide, so an outage logs about once a minute. None means "never
+    # warned": monotonic() counts from an arbitrary origin (often boot), so
+    # on a freshly started instance it can be under 60 -- comparing against
+    # 0.0 would then silently swallow the first warning after a cold start.
+    _last_warning: float | None = None
 
     def __init__(self, name: str, max_requests: int, window_seconds: float):
         self.name = name
@@ -86,7 +90,7 @@ class SharedLimiter:
             count = int(results[0]["result"])
         except (upstash.UpstashError, KeyError, TypeError, ValueError) as e:
             now = time.monotonic()
-            if now - SharedLimiter._last_warning > 60:
+            if SharedLimiter._last_warning is None or now - SharedLimiter._last_warning > 60:
                 SharedLimiter._last_warning = now
                 log.warning("shared rate limiter unavailable, using per-instance limits: %s", e)
             return self.local.hit(key)
