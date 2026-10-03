@@ -1,7 +1,9 @@
 """Minimal Upstash Redis client over its REST API (plain HTTP, no redis
 library), shared by the keystore and the cross-instance rate limiter.
 
-Configured by UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN.
+Configured by UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN, or by
+KV_REST_API_URL and KV_REST_API_TOKEN -- the names Vercel's Upstash
+integration injects when a database is connected to the project.
 """
 
 import http.client
@@ -15,12 +17,21 @@ class UpstashError(RuntimeError):
     pass
 
 
+# Checked in order; a pair is used only when both halves are set, so a
+# half-configured pair never mixes with the other one's URL or token.
+_ENV_PAIRS = (
+    ("UPSTASH_REDIS_REST_URL", "UPSTASH_REDIS_REST_TOKEN"),
+    ("KV_REST_API_URL", "KV_REST_API_TOKEN"),
+)
+
+
 def config() -> tuple[str, str] | None:
-    url = os.environ.get("UPSTASH_REDIS_REST_URL")
-    token = os.environ.get("UPSTASH_REDIS_REST_TOKEN")
-    if not url or not token:
-        return None
-    return url.rstrip("/"), token
+    for url_var, token_var in _ENV_PAIRS:
+        url = os.environ.get(url_var)
+        token = os.environ.get(token_var)
+        if url and token:
+            return url.rstrip("/"), token
+    return None
 
 
 def is_configured() -> bool:
@@ -30,7 +41,7 @@ def is_configured() -> bool:
 def _post(path: str, payload, timeout: float):
     cfg = config()
     if not cfg:
-        raise UpstashError("Upstash Redis is not configured (UPSTASH_REDIS_REST_URL/TOKEN)")
+        raise UpstashError("Upstash Redis is not configured (UPSTASH_REDIS_REST_URL/TOKEN or KV_REST_API_URL/TOKEN)")
     url, token = cfg
     req = urllib.request.Request(
         url + path,

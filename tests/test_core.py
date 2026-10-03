@@ -590,6 +590,24 @@ class SharedLimiterTests(unittest.TestCase):
                 make_limiter("x", 2, 60).hit("ip")
 
 
+class UpstashConfigTests(unittest.TestCase):
+    def config_with(self, env):
+        from agentbridge import upstash
+
+        with mock.patch.dict(os.environ, env, clear=True):
+            return upstash.config()
+
+    def test_accepts_vercel_integration_names(self):
+        self.assertEqual(self.config_with({"KV_REST_API_URL": "https://kv/", "KV_REST_API_TOKEN": "t"}), ("https://kv", "t"))
+
+    def test_upstash_names_win_and_pairs_never_mix(self):
+        both = {"UPSTASH_REDIS_REST_URL": "https://u", "UPSTASH_REDIS_REST_TOKEN": "ut",
+                "KV_REST_API_URL": "https://kv", "KV_REST_API_TOKEN": "kt"}
+        self.assertEqual(self.config_with(both), ("https://u", "ut"))
+        half = {"UPSTASH_REDIS_REST_URL": "https://u", "KV_REST_API_TOKEN": "kt"}
+        self.assertIsNone(self.config_with(half))
+
+
 class ProviderConfigTests(unittest.TestCase):
     def capture(self, provider, reply, credential="k"):
         seen = {}

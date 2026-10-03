@@ -250,6 +250,7 @@ keys (the default) never touch your server's storage at all.
    - Sign up free at [upstash.com](https://upstash.com) — no card required
    - Create a Redis database (any region)
    - From its dashboard, copy the **REST URL** and **REST Token**
+   - On Vercel you can skip the copying: **Storage → Create Database → Upstash for Redis**, then connect it to the project. The integration sets `KV_REST_API_URL`/`KV_REST_API_TOKEN`, which AgentBridge reads as well as the two `UPSTASH_` names below.
 
 **3. Set these environment variables on your host** (Vercel: Project Settings → Environment Variables; PythonAnywhere: there's an Environment Variables section on the Web tab):
 
@@ -271,7 +272,7 @@ Two environment variables matter mostly on serverless hosts like Vercel:
 
 | Variable | What it does |
 |---|---|
-| `RATE_LIMIT_STORE=upstash` | Counts rate limits in Upstash Redis, so every server instance shares one count per visitor. By default each instance counts on its own, so the effective limit is "N per instance" and resets on every cold start. It uses the same `UPSTASH_REDIS_REST_URL`/`TOKEN` as saved keys. If Upstash is unreachable it falls back to per-instance limits (logged) rather than blocking requests. |
+| `RATE_LIMIT_STORE=upstash` | Counts rate limits in Upstash Redis, so every server instance shares one count per visitor. By default each instance counts on its own, so the effective limit is "N per instance" and resets on every cold start. It uses the same Upstash credentials as saved keys (`UPSTASH_REDIS_REST_URL`/`TOKEN`, or `KV_REST_API_URL`/`TOKEN` from Vercel's integration). If Upstash is unreachable it falls back to per-instance limits (logged) rather than blocking requests. |
 | `PROVIDER_TIMEOUT_SECONDS` | How long to wait for Anthropic, OpenAI or Ollama before giving up. The defaults are 120 s, and 300 s for Ollama. Set it a little below your host's request time limit, so a slow reply ends with a clear "didn't respond" message instead of the platform cutting the request off. |
 
 ## Site integrations (Gmail, Google Drive, Figma, GitHub, Calendly)
