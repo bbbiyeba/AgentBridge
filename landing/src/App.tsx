@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef } from "react";
-import type { CSSProperties, FormEvent } from "react";
+import { Component, useState, useEffect, useRef } from "react";
+import type { CSSProperties, FormEvent, ReactNode } from "react";
 import { Analytics } from "@vercel/analytics/react";
 import {
   ApiError,
@@ -81,7 +81,7 @@ const LOG_LINES = [
   { time: "09:14:02", agent: "claude", icon: "◆", color: "#6c6cff", text: "Analysing codebase structure..." },
   { time: "09:14:05", agent: "claude", icon: "◆", color: "#6c6cff", text: "Found 3 components with prop-drilling issues" },
   { time: "09:14:05", agent: "claude", icon: "◆", color: "#6c6cff", text: "Proposing context refactor in src/store.ts" },
-  { time: "09:14:07", agent: "system", icon: "→", color: "#7070a0", text: "Handing off to reviewer (ChatGPT)" },
+  { time: "09:14:07", agent: "system", icon: "→", color: "#8686b4", text: "Handing off to reviewer (ChatGPT)" },
   { time: "09:14:08", agent: "gpt", icon: "●", color: "#3ddc84", text: "Reading src/store.ts..." },
   { time: "09:14:10", agent: "gpt", icon: "●", color: "#3ddc84", text: "Writing UserContext, CartContext..." },
   { time: "09:14:14", agent: "gpt", icon: "●", color: "#3ddc84", text: "Updated 7 files, set handoff to null" },
@@ -199,7 +199,7 @@ function AgentCard({ agent, active }: { agent: typeof AGENTS[0]; active: boolean
         >
           <span
             className="w-1.5 h-1.5 rounded-full"
-            style={{ background: active ? agent.color : "#7070a0" }}
+            style={{ background: active ? agent.color : "#8686b4" }}
           />
           {active ? "active" : "ready"}
         </div>
@@ -224,61 +224,90 @@ function AgentCard({ agent, active }: { agent: typeof AGENTS[0]; active: boolean
 const WEB3FORMS_ACCESS_KEY =
   import.meta.env.VITE_WEB3FORMS_ACCESS_KEY || "6f72d69b-efd9-4529-8d43-29411795dcb6";
 
+async function sendViaWeb3Forms(data: FormData) {
+  if (!WEB3FORMS_ACCESS_KEY) throw new Error("Contact form isn't configured yet (missing access key).");
+  const body = new FormData();
+  for (const field of ["name", "email", "message"]) body.append(field, String(data.get(field) ?? ""));
+  body.append("access_key", WEB3FORMS_ACCESS_KEY);
+  body.append("subject", "New message from the AgentBridge site");
+  let res: Response;
+  try {
+    res = await fetch("https://api.web3forms.com/submit", {
+      method: "POST",
+      headers: { Accept: "application/json" },
+      body,
+      signal: AbortSignal.timeout(15000),
+    });
+  } catch {
+    throw new Error("Could not reach the form service. Try again in a bit.");
+  }
+  // An error page (e.g. HTML 429) isn't JSON; report it as what it is.
+  const result = await res.json().catch(() => null);
+  if (!res.ok || !result?.success) {
+    throw new Error(result?.message || `The form service returned an error (${res.status}). Try again in a bit.`);
+  }
+}
+
 function ContactForm() {
   const [status, setStatus] = useState<"idle" | "sending" | "sent" | "error">("idle");
   const [errorMessage, setErrorMessage] = useState("");
+  // State updates are async, so a fast double-click could start two sends
+  // before the button re-renders as disabled. A ref blocks it synchronously.
+  const inFlight = useRef(false);
+  // The form (and the focused button) is replaced on success; move focus to
+  // the confirmation so keyboard and screen-reader users land on it.
+  const sentRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (status === "sent") sentRef.current?.focus();
+  }, [status]);
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    if (inFlight.current) return;
+    inFlight.current = true;
+    setStatus("sending");
     const form = e.currentTarget;
     const data = new FormData(form);
-
-    // Prefer sending through the backend's Gmail integration; until that's
-    // configured, keep using Web3Forms so the form never goes dark.
-    if ((await getIntegrations()).gmail?.configured) {
-      setStatus("sending");
-      try {
-        await sendContact({
-          name: String(data.get("name") ?? ""),
-          email: String(data.get("email") ?? ""),
-          message: String(data.get("message") ?? ""),
-          website: String(data.get("website") ?? ""),
-        });
-        setStatus("sent");
-        form.reset();
-      } catch (err) {
-        setStatus("error");
-        setErrorMessage(err instanceof ApiError ? err.message : "Something went wrong sending that.");
-      }
-      return;
-    }
-
-    if (!WEB3FORMS_ACCESS_KEY) {
+    const fail = (message: string) => {
       setStatus("error");
-      setErrorMessage("Contact form isn't configured yet (missing access key).");
-      return;
-    }
-    setStatus("sending");
-    data.delete("website");
-    data.append("access_key", WEB3FORMS_ACCESS_KEY);
-    data.append("subject", "New message from the AgentBridge site");
+      setErrorMessage(message);
+    };
+    const done = () => {
+      setStatus("sent");
+      form.reset();
+    };
+
     try {
-      const res = await fetch("https://api.web3forms.com/submit", {
-        method: "POST",
-        headers: { Accept: "application/json" },
-        body: data,
-      });
-      const result = await res.json();
-      if (result.success) {
-        setStatus("sent");
-        form.reset();
-      } else {
-        setStatus("error");
-        setErrorMessage(result.message || "Something went wrong sending that.");
+      // Honeypot filled in: a bot. Pretend it worked without sending anything.
+      if (String(data.get("website") ?? "").trim()) return done();
+
+      // Prefer the backend's Gmail integration. If it isn't configured -- or
+      // the backend itself is down or erroring -- fall back to Web3Forms so a
+      // visitor's message still gets through. (Errors about the input, or
+      // rate limiting, are shown instead: retrying elsewhere wouldn't help.)
+      if ((await getIntegrations()).gmail?.configured) {
+        try {
+          await sendContact({
+            name: String(data.get("name") ?? ""),
+            email: String(data.get("email") ?? ""),
+            message: String(data.get("message") ?? ""),
+            website: "",
+          });
+          return done();
+        } catch (err) {
+          if (!(err instanceof ApiError) || !err.isServerFailure) {
+            return fail(err instanceof ApiError ? err.message : "Something went wrong sending that.");
+          }
+          console.warn("Gmail contact send failed; falling back to Web3Forms.", err);
+        }
       }
-    } catch {
-      setStatus("error");
-      setErrorMessage("Could not reach the form service. Try again in a bit.");
+
+      await sendViaWeb3Forms(data);
+      done();
+    } catch (err) {
+      fail(err instanceof Error ? err.message : "Something went wrong sending that.");
+    } finally {
+      inFlight.current = false;
     }
   }
 
@@ -296,19 +325,27 @@ function ContactForm() {
   if (status === "sent") {
     return (
       <div
-        className="rounded-xl p-6 border text-sm"
+        ref={sentRef}
+        tabIndex={-1}
+        role="status"
+        className="rounded-xl p-6 border text-sm outline-none"
         style={{ borderColor: "var(--color-border)", background: "var(--color-surface)", color: "var(--color-text)" }}
       >
-        <span style={{ color: "var(--color-green)" }}>✓</span> Thanks — that's sent. I'll get back to you soon.
+        <span style={{ color: "var(--color-green)" }} aria-hidden="true">✓</span> Thanks — that's sent. I'll get back to you soon.
       </div>
     );
   }
 
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-3 max-w-md">
-      <input type="text" name="name" placeholder="First and Last Name" required style={inputStyle} />
-      <input type="email" name="email" placeholder="Email" required style={inputStyle} />
-      <textarea name="message" placeholder="What's up?" required rows={4} maxLength={5000} style={{ ...inputStyle, resize: "vertical" }} />
+      {/* Visually hidden labels: placeholders vanish while typing and aren't
+          reliably announced by screen readers. */}
+      <label htmlFor="contact-name" className="sr-only">Name</label>
+      <input id="contact-name" type="text" name="name" autoComplete="name" placeholder="First and Last Name" required style={inputStyle} />
+      <label htmlFor="contact-email" className="sr-only">Email</label>
+      <input id="contact-email" type="email" name="email" autoComplete="email" placeholder="Email" required style={inputStyle} />
+      <label htmlFor="contact-message" className="sr-only">Message</label>
+      <textarea id="contact-message" name="message" placeholder="What's up?" required rows={4} maxLength={5000} style={{ ...inputStyle, resize: "vertical" }} />
       {/* Honeypot: hidden from people and screen readers; bots fill it in and the backend drops their message. */}
       <input
         type="text"
@@ -323,7 +360,7 @@ function ContactForm() {
         disabled={status === "sending"}
         className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl font-medium text-sm transition-all duration-200 w-fit"
         style={{
-          background: "var(--color-accent)",
+          background: "var(--color-accent-strong)",
           color: "#fff",
           fontFamily: "var(--font-display)",
           opacity: status === "sending" ? 0.6 : 1,
@@ -334,7 +371,7 @@ function ContactForm() {
         {status === "sending" ? "Sending..." : "Send message"}
       </button>
       {status === "error" && (
-        <p className="text-xs" style={{ color: "#f85149" }}>
+        <p className="text-xs" role="alert" style={{ color: "#f85149" }}>
           {errorMessage}
         </p>
       )}
@@ -399,9 +436,28 @@ function DesignShowcase() {
   );
 }
 
+// Wraps each integration-driven section: if one throws while rendering
+// (say, the backend's data changed shape), that section disappears instead
+// of React unmounting the entire page.
+class OptionalSection extends Component<{ name: string; children: ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  componentDidCatch(error: unknown) {
+    console.warn(`The ${this.props.name} section failed to render and was hidden.`, error);
+  }
+
+  render() {
+    return this.state.failed ? null : this.props.children;
+  }
+}
+
 const compact = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 });
 
-function SectionHeading({ eyebrow, title, aside }: { eyebrow: string; title: string; aside?: React.ReactNode }) {
+function SectionHeading({ eyebrow, title, aside }: { eyebrow: string; title: string; aside?: ReactNode }) {
   return (
     <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-10">
       <div>
@@ -621,7 +677,7 @@ export default function App() {
         <div className="flex items-center gap-2.5">
           <div
             className="w-7 h-7 rounded-md flex items-center justify-center text-sm font-bold"
-            style={{ background: "var(--color-accent)", color: "#fff", fontFamily: "var(--font-mono)" }}
+            style={{ background: "var(--color-accent-strong)", color: "#fff", fontFamily: "var(--font-mono)" }}
           >
             A
           </div>
@@ -666,14 +722,18 @@ export default function App() {
             className="md:hidden"
             onClick={() => setMenuOpen(!menuOpen)}
             style={{ color: "var(--color-muted)" }}
+            aria-label={menuOpen ? "Close menu" : "Open menu"}
+            aria-expanded={menuOpen}
+            aria-controls="mobile-menu"
           >
-            {menuOpen ? "✕" : "☰"}
+            <span aria-hidden="true">{menuOpen ? "✕" : "☰"}</span>
           </button>
         </div>
       </nav>
 
       {menuOpen && (
         <div
+          id="mobile-menu"
           className="md:hidden border-b px-6 py-4 flex flex-col gap-4"
           style={{ background: "var(--color-surface)", borderColor: "var(--color-border)" }}
         >
@@ -751,7 +811,7 @@ export default function App() {
                 rel="noopener noreferrer"
                 className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl font-medium text-sm transition-all duration-200"
                 style={{
-                  background: "var(--color-accent)",
+                  background: "var(--color-accent-strong)",
                   color: "#fff",
                   fontFamily: "var(--font-display)",
                 }}
@@ -984,7 +1044,7 @@ export default function App() {
                   rel="noopener noreferrer"
                   className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl font-medium text-sm transition-all duration-200"
                   style={{
-                    background: "var(--color-accent)",
+                    background: "var(--color-accent-strong)",
                     color: "#fff",
                     fontFamily: "var(--font-display)",
                   }}
@@ -1019,12 +1079,6 @@ export default function App() {
           </div>
         </div>
       </section>
-
-      <GitHubSection />
-
-      <DesignShowcase />
-
-      <BookingSection />
 
       {/* Contact */}
       <section id="contact" className="border-t" style={{ borderColor: "var(--color-border)" }}>
@@ -1080,12 +1134,29 @@ export default function App() {
               >
                 <span style={{ color: "var(--color-accent)" }}>⚑</span> Report an issue
               </a>
-              <ResumeLink />
-              <BookingLink />
+              <OptionalSection name="ResumeLink">
+                <ResumeLink />
+              </OptionalSection>
+              <OptionalSection name="BookingLink">
+                <BookingLink />
+              </OptionalSection>
             </div>
           </div>
         </div>
       </section>
+
+      {/* Integration-driven sections. They appear only once the backend
+          reports them configured, so they sit below Contact: loading late
+          can't push the contact form down while someone is using it. */}
+      <OptionalSection name="Booking">
+        <BookingSection />
+      </OptionalSection>
+      <OptionalSection name="GitHub">
+        <GitHubSection />
+      </OptionalSection>
+      <OptionalSection name="Design">
+        <DesignShowcase />
+      </OptionalSection>
 
       {/* Footer */}
       <footer className="border-t px-6 md:px-12 py-8" style={{ borderColor: "var(--color-border)" }}>
@@ -1093,7 +1164,7 @@ export default function App() {
           <div className="flex items-center gap-2.5">
             <div
               className="w-5 h-5 rounded flex items-center justify-center text-xs font-bold"
-              style={{ background: "var(--color-accent)", color: "#fff", fontFamily: "var(--font-mono)" }}
+              style={{ background: "var(--color-accent-strong)", color: "#fff", fontFamily: "var(--font-mono)" }}
             >
               A
             </div>

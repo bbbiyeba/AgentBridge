@@ -54,7 +54,7 @@ class GitHubIntegration(Integration):
     @property
     def cache(self) -> TTLCache:
         if self._cache is None:
-            self._cache = TTLCache(float(self.get("GITHUB_CACHE_SECONDS") or 600))
+            self._cache = TTLCache(self.number("GITHUB_CACHE_SECONDS"))
         return self._cache
 
     def routes(self) -> list[Route]:
@@ -129,6 +129,13 @@ class GitHubIntegration(Integration):
             if wanted:
                 by_name = {r["name"].lower(): r for r in own}
                 featured = [by_name[n] for n in wanted if n in by_name]
+                unknown = [n for n in wanted if n not in by_name]
+                if unknown:
+                    current_app.logger.warning(
+                        "GITHUB_FEATURED_REPOS lists repos not found among %s's own non-fork repos: %s",
+                        user,
+                        ", ".join(unknown),
+                    )
             else:
                 candidates = [r for r in own if not r.get("archived")]
                 featured = sorted(

@@ -6,8 +6,10 @@ are returned as-is (they're public S3 links that stay valid for weeks),
 so image bytes never pass through this server.
 """
 
-from .base import Integration, IntegrationError, Route, Setting, TTLCache, parse_list
+from flask import current_app
+
 from . import http
+from .base import Integration, IntegrationError, Route, Setting, TTLCache, parse_list
 
 API = "https://api.figma.com/v1"
 MAX_FRAMES = 12
@@ -50,7 +52,7 @@ class FigmaIntegration(Integration):
     @property
     def cache(self) -> TTLCache:
         if self._cache is None:
-            self._cache = TTLCache(float(self.get("FIGMA_CACHE_SECONDS") or 3600))
+            self._cache = TTLCache(self.number("FIGMA_CACHE_SECONDS"))
         return self._cache
 
     def routes(self) -> list[Route]:
@@ -94,6 +96,8 @@ class FigmaIntegration(Integration):
                 doc = node.get("document")
                 if doc:
                     frames.append({"id": node_id, "name": doc.get("name", "")})
+                else:
+                    current_app.logger.warning("FIGMA_NODE_IDS: node %s not found in file %s", node_id, file_key)
         else:
             data = self._get(f"/files/{file_key}", {"depth": "2"})
             pages = (data.get("document") or {}).get("children") or []
@@ -119,6 +123,9 @@ class FigmaIntegration(Integration):
                         "scale": self.get("FIGMA_IMAGE_SCALE") or "2",
                     },
                 ).get("images") or {}
+            unrendered = [f["id"] for f in frames if not urls.get(f["id"])]
+            if unrendered:
+                current_app.logger.warning("Figma returned no render for frames %s (empty?)", ", ".join(unrendered))
             return {
                 "file": info,
                 "embed_url": self.embed_url(),

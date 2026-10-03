@@ -19,6 +19,9 @@ class Settings:
     max_ledger_context: int
     max_turns: int
     require_client_keys: bool
+    # How much workspace file content (in characters) goes into each turn's
+    # prompt, so agents edit the code that's actually there.
+    max_file_context_chars: int = 60_000
 
 
 @dataclass
@@ -36,6 +39,20 @@ class Config:
         )
 
 
+def _as_bool(value, name: str) -> bool:
+    """YAML gives real booleans for true/false, but a quoted "false" is a
+    non-empty string -- which bool() would read as True."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str) and value.strip().lower() in ("true", "yes", "on", "1"):
+        return True
+    if isinstance(value, str) and value.strip().lower() in ("false", "no", "off", "0", ""):
+        return False
+    if isinstance(value, int):
+        return bool(value)
+    raise ValueError(f"settings.{name} must be true or false, got {value!r}")
+
+
 def load_config(path: str | Path = "config.yaml") -> Config:
     path = Path(path)
     if not path.exists():
@@ -50,12 +67,14 @@ def load_config(path: str | Path = "config.yaml") -> Config:
     if not agents:
         raise ValueError(f"{path} must define at least one agent under 'agents:'")
 
-    settings_raw = raw.get("settings", {})
+    # `settings:` with nothing under it parses as None.
+    settings_raw = raw.get("settings") or {}
     settings = Settings(
         workspace_dir=Path(settings_raw.get("workspace_dir", "workspace")),
         mailboard_file=Path(settings_raw.get("mailboard_file", "mailboard.json")),
         max_ledger_context=int(settings_raw.get("max_ledger_context", 6)),
         max_turns=int(settings_raw.get("max_turns", 20)),
-        require_client_keys=bool(settings_raw.get("require_client_keys", False)),
+        require_client_keys=_as_bool(settings_raw.get("require_client_keys", False), "require_client_keys"),
+        max_file_context_chars=int(settings_raw.get("max_file_context_chars", 60_000)),
     )
     return Config(agents=agents, settings=settings)

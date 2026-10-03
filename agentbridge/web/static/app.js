@@ -44,6 +44,42 @@ document.querySelectorAll("[data-provider]").forEach((el) => {
   if (emoji && slot && !slot.textContent) slot.textContent = emoji;
 });
 
+// Every API call goes through here so failures are reported the same way:
+// a non-2xx status, an {ok:false} body, a network error, or a non-JSON
+// reply (e.g. the platform's HTML 504 page when a request runs too long)
+// all come back as {ok:false, error}, never as a thrown SyntaxError or a
+// silently ignored response.
+async function api(url, options = {}) {
+  let res;
+  try {
+    res = await fetch(url, options);
+  } catch (e) {
+    return { ok: false, error: "couldn't reach the server" };
+  }
+  let data = null;
+  try {
+    data = await res.json();
+  } catch (e) {
+    const hint = res.status === 504 ? " (the request took too long)" : "";
+    return { ok: false, error: `server returned HTTP ${res.status} instead of data${hint}` };
+  }
+  if (!res.ok || !data || data.ok === false) {
+    return { ok: false, error: (data && data.error) || `server returned HTTP ${res.status}` };
+  }
+  return { ok: true, ...data };
+}
+
+function postJson(url, body) {
+  return api(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+}
+
+function flash(el, text, isError = false, ms = 2200) {
+  el.textContent = text;
+  el.classList.toggle("err", isError);
+  el.classList.add("show");
+  setTimeout(() => el.classList.remove("show"), isError ? ms * 3 : ms);
+}
+
 const KEYS_STORAGE_KEY = "agentbridge:keys";
 
 function loadStoredKeys() {
@@ -72,6 +108,17 @@ const authLoginLink = document.getElementById("auth-login-link");
 const authLogoutLink = document.getElementById("auth-logout-link");
 
 let isSignedIn = false;
+
+// Sign-out is a POST (so other sites can't trigger it with a plain link);
+// the link keeps its href for semantics, and this does the actual request.
+if (authLogoutLink) {
+  authLogoutLink.addEventListener("click", async (e) => {
+    e.preventDefault();
+    const result = await postJson("/auth/logout", {});
+    if (result.ok) window.location.reload();
+    else authStatus.textContent = `Couldn't sign out: ${result.error}`;
+  });
+}
 let keysLoadedFromServer = false;
 
 if (keyAnthropic && keyOpenai) {
@@ -82,22 +129,13 @@ if (keyAnthropic && keyOpenai) {
   saveKeysBtn.addEventListener("click", async () => {
     const keys = { anthropic: keyAnthropic.value.trim(), openai: keyOpenai.value.trim() };
     saveStoredKeys(keys);
-    if (isSignedIn) {
-      try {
-        await fetch("/api/keys", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ keys }),
-        });
-        keysSavedNote.textContent = "saved to your account — synced across devices.";
-      } catch (e) {
-        keysSavedNote.textContent = "saved in this browser only (couldn't reach your account).";
-      }
+    if (!isSignedIn) return flash(keysSavedNote, "saved in this browser only.");
+    const result = await postJson("/api/keys", { keys });
+    if (result.ok) {
+      flash(keysSavedNote, "saved to your account — synced across devices.");
     } else {
-      keysSavedNote.textContent = "saved in this browser only.";
+      flash(keysSavedNote, `saved in this browser only — your account wasn't updated: ${result.error}`, true);
     }
-    keysSavedNote.classList.add("show");
-    setTimeout(() => keysSavedNote.classList.remove("show"), 2200);
   });
 }
 
@@ -117,15 +155,15 @@ async function refreshAuthUI(state) {
 
     if (!keysLoadedFromServer && keyAnthropic && keyOpenai) {
       keysLoadedFromServer = true;
-      try {
-        const res = await fetch("/api/keys");
-        const data = await res.json();
-        if (data.ok) {
-          if (data.keys.anthropic) keyAnthropic.value = data.keys.anthropic;
-          if (data.keys.openai) keyOpenai.value = data.keys.openai;
-        }
-      } catch (e) {
-        // fall back silently to whatever localStorage already populated
+      const result = await api("/api/keys");
+      if (result.ok) {
+        if (result.keys.anthropic) keyAnthropic.value = result.keys.anthropic;
+        if (result.keys.openai) keyOpenai.value = result.keys.openai;
+      } else {
+        // Say so, and try again on the next refresh, rather than leaving the
+        // fields blank as if no keys were ever saved.
+        keysLoadedFromServer = false;
+        authStatus.textContent = `Signed in as ${state.user.email}. Couldn't load your saved keys: ${result.error}`;
       }
     }
   } else {
@@ -145,7 +183,9 @@ function currentCredentials() {
 }
 
 function escapeHtml(s) {
-  return s
+  // String(): ledger fields come from AI output, so never assume their type.
+  const text = s !== null && typeof s === "object" ? JSON.stringify(s) : String(s ?? "");
+  return text
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
@@ -169,10 +209,10 @@ function renderDiff(diff) {
 function renderLedger(state) {
   const entries = state.entries || [];
   if (entries.length === lastEntryCount) return;
-  lastEntryCount = entries.length;
 
   if (entries.length === 0) {
     ledgerEntries.innerHTML = `<div class="empty-state">No turns yet. Set a task above and give an agent the mic.</div>`;
+    lastEntryCount = 0;
     return;
   }
 
@@ -185,7 +225,7 @@ function renderLedger(state) {
     const files = (entry.files || [])
       .map(
         (f) =>
-          `<span class="file-chip" data-path="${escapeHtml(f.path)}">${f.action}: ${escapeHtml(f.path)}</span>`
+          `<span class="file-chip" data-path="${escapeHtml(f.path)}">${escapeHtml(f.action)}: ${escapeHtml(f.path)}</span>`
       )
       .join("") || `<span class="empty-state">no files touched</span>`;
 
@@ -194,7 +234,7 @@ function renderLedger(state) {
     div.innerHTML = `
       <div class="entry-head">
         <span>${emoji} <span class="entry-agent">${escapeHtml(entry.agent)}</span> · ${escapeHtml(entry.provider)}/${escapeHtml(entry.model)}</span>
-        <span>#${entry.id} · ${escapeHtml(entry.timestamp)}</span>
+        <span>#${escapeHtml(entry.id)} · ${escapeHtml(entry.timestamp)}</span>
       </div>
       <div class="entry-message">${escapeHtml(entry.message)}</div>
       <div class="entry-files">${files}</div>
@@ -211,13 +251,18 @@ function renderLedger(state) {
 
     ledgerEntries.appendChild(div);
   });
+  // Only after a successful render, so a failure is retried next refresh
+  // instead of freezing the ledger.
+  lastEntryCount = entries.length;
 }
 
 async function refresh() {
   try {
-    const res = await fetch("/api/state");
-    const state = await res.json();
+    const state = await api("/api/state");
+    if (!state.ok) throw new Error(state.error);
     if (!turnInFlight) statusDot.className = "dot ok";
+    const banner = document.getElementById("ephemeral-banner");
+    if (banner) banner.hidden = !state.ephemeral_storage;
 
     if (!taskDirty) taskInput.value = state.task || "";
     fileTree.textContent = state.file_tree || "(workspace is an empty canvas, or just empty)";
@@ -233,15 +278,14 @@ taskInput.addEventListener("input", () => {
 });
 
 saveTaskBtn.addEventListener("click", async () => {
-  await fetch("/api/task", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ task: taskInput.value }),
-  });
-  taskDirty = false;
-  taskSavedNote.textContent = "saved.";
-  taskSavedNote.classList.add("show");
-  setTimeout(() => taskSavedNote.classList.remove("show"), 1500);
+  const result = await postJson("/api/task", { task: taskInput.value });
+  if (result.ok) {
+    taskDirty = false;
+    flash(taskSavedNote, "saved.", false, 1500);
+  } else {
+    // taskDirty stays true so the next refresh doesn't overwrite the unsaved text.
+    flash(taskSavedNote, `not saved: ${result.error}`, true);
+  }
 });
 
 document.querySelectorAll(".agent-btn").forEach((btn) => {
@@ -264,12 +308,7 @@ document.querySelectorAll(".agent-btn").forEach((btn) => {
     }, 1400);
 
     try {
-      const res = await fetch("/api/turn", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ agent, keys: currentCredentials() }),
-      });
-      const data = await res.json();
+      const data = await postJson("/api/turn", { agent, keys: currentCredentials() });
       clearInterval(rotator);
       if (!data.ok) {
         turnStatus.textContent = `nope: ${data.error}`;

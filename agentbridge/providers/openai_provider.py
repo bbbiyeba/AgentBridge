@@ -15,6 +15,17 @@ def chat(model: str, system: str, messages: list[dict], credential: str | None =
     headers = {"Authorization": f"Bearer {api_key}"}
     data = post_json(API_URL, body, headers)
     try:
-        return data["choices"][0]["message"]["content"]
-    except (KeyError, IndexError) as e:
+        choice = data["choices"][0]
+        content = choice["message"].get("content")
+    except (KeyError, IndexError, TypeError, AttributeError) as e:
         raise ProviderError(f"Unexpected OpenAI response shape: {data}") from e
+    if choice.get("finish_reason") == "length":
+        raise ProviderError(
+            "OpenAI's reply was cut off at the output limit before the JSON was complete. "
+            "Ask the agent for a smaller change and try again."
+        )
+    if not content:
+        # e.g. a refusal, which arrives as message.refusal with content null
+        refusal = choice["message"].get("refusal")
+        raise ProviderError(f"OpenAI returned no content{': ' + refusal if refusal else ''}")
+    return content

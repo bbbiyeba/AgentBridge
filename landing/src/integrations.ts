@@ -30,18 +30,41 @@ export type GitHubStats = {
   }[];
 };
 
-export class ApiError extends Error {}
+/** status is the HTTP status, or 0 when the server couldn't be reached at all. */
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+  }
+
+  /** The server is down or broken, as opposed to rejecting what was sent. */
+  get isServerFailure() {
+    return this.status === 0 || this.status >= 500;
+  }
+}
+
+// Without a timeout, a backend that accepts the connection and then hangs
+// keeps every feature (and the contact form) waiting for minutes.
+const STATUS_TIMEOUT_MS = 5000;
+const REQUEST_TIMEOUT_MS = 15000;
 
 let statusPromise: Promise<IntegrationStatus> | null = null;
 
-// One shared request per page load: every component that asks gets the
-// same promise. Any failure resolves to {} so features just stay hidden
-// (and the contact form falls back) instead of breaking the page.
+// One shared request: every component that asks gets the same promise. A
+// failure resolves to {} so features stay hidden (and the contact form
+// falls back) instead of breaking the page -- but it isn't cached, so the
+// next caller (e.g. a later contact form submit) tries again.
 export function getIntegrations(): Promise<IntegrationStatus> {
-  statusPromise ??= fetch(`${API_BASE}/api/integrations`)
-    .then((r) => (r.ok ? r.json() : { integrations: {} }))
+  statusPromise ??= fetch(`${API_BASE}/api/integrations`, { signal: AbortSignal.timeout(STATUS_TIMEOUT_MS) })
+    .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
     .then((d) => (d.integrations ?? {}) as IntegrationStatus)
-    .catch(() => ({}));
+    .catch((err) => {
+      console.warn("Couldn't load site integrations; their features stay hidden.", err);
+      statusPromise = null;
+      return {};
+    });
   return statusPromise;
 }
 
@@ -61,12 +84,15 @@ export function useIntegrations(): IntegrationStatus | null {
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   let res: Response;
   try {
-    res = await fetch(`${API_BASE}/api/integrations${path}`, init);
+    res = await fetch(`${API_BASE}/api/integrations${path}`, {
+      ...init,
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
   } catch {
-    throw new ApiError("Could not reach the server. Try again in a bit.");
+    throw new ApiError("Could not reach the server. Try again in a bit.", 0);
   }
   const data = await res.json().catch(() => ({}));
-  if (!res.ok || !data.ok) throw new ApiError(data.error || "Something went wrong.");
+  if (!res.ok || !data.ok) throw new ApiError(data.error || "Something went wrong.", res.ok ? 502 : res.status);
   return data as T;
 }
 
@@ -78,14 +104,22 @@ export function sendContact(body: { name: string; email: string; message: string
   });
 }
 
-export function fetchFigmaImages() {
-  return api<{ images: FigmaImage[]; file: { name?: string; lastModified?: string }; embed_url: string }>(
+// Shape checks for the fields the UI dereferences, so a backend change
+// becomes a hidden section rather than a render crash.
+export async function fetchFigmaImages() {
+  const d = await api<{ images: FigmaImage[]; file: { name?: string; lastModified?: string }; embed_url: string }>(
     "/figma/images",
   );
+  if (!Array.isArray(d.images)) throw new ApiError("Unexpected response from the server.", 502);
+  return d;
 }
 
-export function fetchGitHubStats() {
-  return api<GitHubStats>("/github/stats");
+export async function fetchGitHubStats() {
+  const d = await api<GitHubStats>("/github/stats");
+  if (!d.totals || !Array.isArray(d.featured) || !Array.isArray(d.languages) || !d.profile) {
+    throw new ApiError("Unexpected response from the server.", 502);
+  }
+  return d;
 }
 
 // Calendly's inline-embed parameters (the same ones its widget.js adds),

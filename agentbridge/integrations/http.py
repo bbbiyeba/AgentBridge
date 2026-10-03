@@ -6,7 +6,9 @@ service, instead of each integration growing its own slightly different
 copy of urllib boilerplate.
 """
 
+import http.client
 import json
+import math
 import time
 import urllib.error
 import urllib.parse
@@ -88,7 +90,10 @@ def request(
                 status=_status_for(code),
                 detail=f"{method} {_redact(url)} -> HTTP {e.code}: {detail}",
             ) from e
-        except (urllib.error.URLError, TimeoutError) as e:
+        # URLError covers failing to connect; a connection dropped mid-response
+        # surfaces as a bare OSError (ConnectionResetError, RemoteDisconnected)
+        # or http.client.IncompleteRead instead. All are transient: retry.
+        except (OSError, http.client.HTTPException) as e:
             if attempt < retries:
                 attempt += 1
                 time.sleep(_backoff(attempt, None))
@@ -103,9 +108,12 @@ def _backoff(attempt: int, retry_after: str | None) -> float:
     if retry_after:
         try:
             # Honor the server's hint, but never stall a web request for long.
-            return min(float(retry_after), 5.0)
+            # Clamped both ways: a negative or NaN hint would crash sleep().
+            hint = float(retry_after)
+            if math.isfinite(hint):
+                return min(max(hint, 0.0), 5.0)
         except ValueError:
-            pass
+            pass  # an HTTP-date rather than seconds; use our own schedule
     return 0.5 * (2 ** (attempt - 1))
 
 

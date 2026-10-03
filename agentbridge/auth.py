@@ -9,6 +9,7 @@ endpoint rather than checking the signature ourselves, keeping this
 dependency-free like the rest of the app.
 """
 
+import http.client
 import json
 import os
 import secrets
@@ -45,6 +46,23 @@ def build_authorize_url(redirect_uri: str, state: str) -> str:
     return f"{AUTHORIZE_URL}?{urllib.parse.urlencode(params)}"
 
 
+def _fetch_json(req, what: str) -> dict:
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode("utf-8", errors="replace")
+        raise AuthError(f"{what} failed: {detail}") from e
+    except (OSError, http.client.HTTPException) as e:
+        # URLError, timeouts, and dropped connections
+        raise AuthError(f"Could not reach Google: {getattr(e, 'reason', e)}") from e
+    except (json.JSONDecodeError, UnicodeDecodeError) as e:
+        raise AuthError(f"{what} returned a response that isn't JSON") from e
+    if not isinstance(data, dict):
+        raise AuthError(f"{what} returned an unexpected response")
+    return data
+
+
 def exchange_code(code: str, redirect_uri: str) -> dict:
     """Returns {"email": ..., "sub": ...} for the account that signed in."""
     client_id = os.environ["GOOGLE_CLIENT_ID"]
@@ -60,31 +78,22 @@ def exchange_code(code: str, redirect_uri: str) -> dict:
         }
     ).encode("utf-8")
     req = urllib.request.Request(TOKEN_URL, data=body, method="POST")
-    try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            token_data = json.loads(resp.read().decode("utf-8"))
-    except urllib.error.HTTPError as e:
-        detail = e.read().decode("utf-8", errors="replace")
-        raise AuthError(f"Google token exchange failed: {detail}") from e
-    except urllib.error.URLError as e:
-        raise AuthError(f"Could not reach Google: {e.reason}") from e
+    token_data = _fetch_json(req, "Google token exchange")
 
     id_token = token_data.get("id_token")
     if not id_token:
         raise AuthError("Google did not return an id_token")
 
     verify_url = f"{TOKENINFO_URL}?id_token={urllib.parse.quote(id_token)}"
-    try:
-        with urllib.request.urlopen(verify_url, timeout=15) as resp:
-            claims = json.loads(resp.read().decode("utf-8"))
-    except urllib.error.HTTPError as e:
-        detail = e.read().decode("utf-8", errors="replace")
-        raise AuthError(f"Google ID token verification failed: {detail}") from e
-    except urllib.error.URLError as e:
-        raise AuthError(f"Could not reach Google: {e.reason}") from e
+    claims = _fetch_json(verify_url, "Google ID token verification")
 
     if claims.get("aud") != client_id:
         raise AuthError("Google ID token was not issued for this app")
+    if claims.get("iss") not in ("accounts.google.com", "https://accounts.google.com"):
+        raise AuthError("Google ID token has an unexpected issuer")
+    # tokeninfo returns this as the string "true"
+    if str(claims.get("email_verified")).lower() != "true":
+        raise AuthError("Google account email is not verified")
 
     email = claims.get("email")
     sub = claims.get("sub")

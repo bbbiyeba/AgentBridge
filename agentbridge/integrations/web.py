@@ -46,9 +46,13 @@ def create_blueprint(integrations: list[Integration]) -> Blueprint:
         that's for the operator's CLI (python -m agentbridge integrations)."""
         data = {}
         for integ in integrations:
-            entry = {"title": integ.title, "configured": integ.is_configured()}
-            if entry["configured"]:
-                entry.update(integ.public_info())
+            entry = {"title": integ.title, "configured": False}
+            # One integration failing here must not hide every other feature.
+            try:
+                if integ.is_configured():
+                    entry.update(integ.public_info(), configured=True)
+            except Exception:
+                current_app.logger.exception("%s integration status check failed", integ.name)
             data[integ.name] = entry
         resp = jsonify({"ok": True, "integrations": data})
         resp.headers["Cache-Control"] = "public, max-age=60, s-maxage=60"

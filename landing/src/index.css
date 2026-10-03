@@ -14,9 +14,12 @@
   --color-border: #2a2a35;
   --color-border-bright: #3d3d50;
   --color-text: #e8e8f0;
-  --color-muted: #7070a0;
+  /* >= 5.1:1 on bg/surface/surface-2 (WCAG AA needs 4.5:1 for body text) */
+  --color-muted: #8686b4;
   --color-accent: #6c6cff;
   --color-accent-dim: #6c6cff22;
+  /* Backgrounds behind white text: 4.95:1, where --color-accent gives 4.02:1 */
+  --color-accent-strong: #5c5cf0;
   --color-green: #3ddc84;
   --color-green-dim: #3ddc8418;
   --color-orange: #ff8c42;
@@ -40,9 +43,38 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* Thin and quiet rather than hidden: mouse users still need to see where
+   they are on the page and in the scrollable terminal. */
+html {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border-bright) transparent;
+}
 ::-webkit-scrollbar {
-  width: 0px;
-  opacity: 0;
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-border-bright);
+  border-radius: 4px;
+}
+
+/* In-page links (#contact, #book, ...) land below the sticky nav instead
+   of under it. */
+section[id] {
+  scroll-margin-top: 72px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
 ::selection {
