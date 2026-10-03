@@ -5,7 +5,6 @@ venv/
 .env
 .claude/*
 !.claude/settings.json
-!.claude/rules/
 
 # Local config (copy config.example.yaml -> config.yaml)
 config.yaml
