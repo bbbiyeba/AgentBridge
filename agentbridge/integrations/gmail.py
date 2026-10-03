@@ -8,6 +8,7 @@ nobody can use this endpoint to send mail to anyone else.
 
 import base64
 import re
+import unicodedata
 from email.headerregistry import Address
 from email.message import EmailMessage
 from email.utils import formatdate
@@ -58,16 +59,16 @@ class GmailIntegration(Integration):
         )
 
     def contact(self):
-        body = request.get_json(silent=True) or {}
+        body = request.get_json(silent=True)
+        if not isinstance(body, dict):
+            raise IntegrationError("Expected a JSON object with name, email and message", status=400)
         # Honeypot: a field hidden from humans with CSS. Bots fill every
         # input; real visitors leave it blank. Pretend success so the bot
         # doesn't learn it was caught.
         if str(body.get("website") or "").strip():
             return {"sent": True}
         name = _clean_line(body.get("name"), "name", MAX_NAME)
-        email = _clean_line(body.get("email"), "email", MAX_EMAIL)
-        if not EMAIL_RE.match(email):
-            raise IntegrationError("Please enter a valid email address", status=400)
+        email = _normalize_email(_clean_line(body.get("email"), "email", MAX_EMAIL))
         message = str(body.get("message") or "").strip()
         if not message:
             raise IntegrationError("Message can't be empty", status=400)
@@ -114,7 +115,31 @@ def _clean_line(value, field: str, max_len: int) -> str:
         raise IntegrationError(f"Please fill in your {field}", status=400)
     if len(text) > max_len:
         raise IntegrationError(f"{field.capitalize()} is too long", status=400)
-    if any(c in text for c in "\r\n\x00"):
-        # Header injection guard: these end up in email headers.
+    # Header injection guard: these end up in email headers. Control chars
+    # (\r, \n, \x00, \x85, ...) plus Unicode line/paragraph separators,
+    # which Python's email library also treats as line breaks.
+    if any(unicodedata.category(c) in ("Cc", "Zl", "Zp") for c in text):
         raise IntegrationError(f"{field.capitalize()} contains invalid characters", status=400)
     return text
+
+
+def _normalize_email(email: str) -> str:
+    """Returns an ASCII-only address that a reply can actually reach.
+
+    An internationalized domain is converted to its punycode form
+    (exämple.org -> xn--exmple-cua.org), which every mail server accepts.
+    A non-ASCII local part (before the @) can't be written into a header
+    without SMTPUTF8 support end to end, so it's rejected rather than sent
+    as an address the reply would bounce from."""
+    if not EMAIL_RE.match(email):
+        raise IntegrationError("Please enter a valid email address", status=400)
+    local, _, domain = email.rpartition("@")
+    if not local.isascii():
+        raise IntegrationError(
+            "Please use an email address without accented or non-Latin characters before the @", status=400
+        )
+    try:
+        domain = domain.encode("idna").decode("ascii")
+    except UnicodeError:
+        raise IntegrationError("Please enter a valid email address", status=400) from None
+    return f"{local}@{domain}"

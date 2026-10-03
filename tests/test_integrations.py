@@ -336,6 +336,25 @@ class GmailTests(IntegrationTestCase):
         self.assertEqual(resp.status_code, 400)
         self.assertEqual(self.sent, [])
 
+    def test_unicode_line_breaks_in_name_are_400_not_500(self):
+        for name in ("Eve Bcc: x@y.z", "Eve x", "Eve\x85x", "Eve\x0bx"):
+            self.assertEqual(self.post(name=name).status_code, 400, repr(name))
+        self.assertEqual(self.sent, [])
+
+    def test_internationalized_domain_becomes_reachable_punycode(self):
+        self.assertEqual(self.post(email="zoe@exämple.org").status_code, 200)
+        self.assertEqual([a.addr_spec for a in self.sent_message()["Reply-To"].addresses], ["zoe@xn--exmple-cua.org"])
+
+    def test_non_ascii_local_part_is_rejected_not_garbled(self):
+        resp = self.post(email="josé@example.org")
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("before the @", resp.get_json()["error"])
+        self.assertEqual(self.sent, [])
+
+    def test_non_object_json_body_is_400(self):
+        resp = self.client.post("/api/integrations/gmail/contact", json=["not", "an", "object"])
+        self.assertEqual(resp.status_code, 400)
+
     def test_validation(self):
         self.assertEqual(self.post(email="not-an-email").status_code, 400)
         self.assertEqual(self.post(message="   ").status_code, 400)
@@ -423,6 +442,29 @@ class FigmaTests(IntegrationTestCase):
 
 
 class HelperTests(unittest.TestCase):
+    def test_backoff_survives_hostile_retry_after(self):
+        from agentbridge.integrations.http import _backoff
+
+        for hint in ("-1", "nan", "inf", "-inf", "Wed, 21 Oct 2026 07:28:00 GMT", "999"):
+            delay = _backoff(1, hint)
+            self.assertTrue(0 <= delay <= 5, (hint, delay))
+
+    def test_status_survives_one_broken_integration(self):
+        class Broken(integrations.Integration):
+            name, title = "broken", "Broken"
+
+            def public_info(self):
+                raise RuntimeError("boom")
+
+        app = Flask(__name__)
+        app.register_blueprint(integrations.create_blueprint([Broken(environ={}), *integrations.all_integrations()]))
+        with self.assertLogs(level="ERROR"):
+            resp = app.test_client().get("/api/integrations")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json()["integrations"]
+        self.assertFalse(data["broken"]["configured"])
+        self.assertIn("gmail", data)
+
     def test_parse_service_account_accepts_raw_json(self):
         info = google.parse_service_account(json.dumps(SERVICE_ACCOUNT))
         self.assertEqual(info["client_email"], SERVICE_ACCOUNT["client_email"])
@@ -478,8 +520,10 @@ class GitHubTests(IntegrationTestCase):
 
     def test_featured_override(self):
         with mock.patch.dict(os.environ, {"GITHUB_FEATURED_REPOS": "site, missing"}):
-            data = self.client.get("/api/integrations/github/stats").get_json()
+            with self.assertLogs(level="WARNING") as logs:
+                data = self.client.get("/api/integrations/github/stats").get_json()
         self.assertEqual([r["name"] for r in data["featured"]], ["site"])
+        self.assertIn("missing", "\n".join(logs.output))
 
     def test_contributions_failure_degrades_gracefully(self):
         self.upstream.on("POST", "https://api.github.com/graphql", lambda c: (401, b"bad creds"))

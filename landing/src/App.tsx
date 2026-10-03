@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef } from "react";
-import type { CSSProperties, FormEvent } from "react";
+import { Component, useState, useEffect, useRef } from "react";
+import type { CSSProperties, FormEvent, ReactNode } from "react";
 import { Analytics } from "@vercel/analytics/react";
 import {
   ApiError,
@@ -224,61 +224,84 @@ function AgentCard({ agent, active }: { agent: typeof AGENTS[0]; active: boolean
 const WEB3FORMS_ACCESS_KEY =
   import.meta.env.VITE_WEB3FORMS_ACCESS_KEY || "6f72d69b-efd9-4529-8d43-29411795dcb6";
 
+async function sendViaWeb3Forms(data: FormData) {
+  if (!WEB3FORMS_ACCESS_KEY) throw new Error("Contact form isn't configured yet (missing access key).");
+  const body = new FormData();
+  for (const field of ["name", "email", "message"]) body.append(field, String(data.get(field) ?? ""));
+  body.append("access_key", WEB3FORMS_ACCESS_KEY);
+  body.append("subject", "New message from the AgentBridge site");
+  let res: Response;
+  try {
+    res = await fetch("https://api.web3forms.com/submit", {
+      method: "POST",
+      headers: { Accept: "application/json" },
+      body,
+      signal: AbortSignal.timeout(15000),
+    });
+  } catch {
+    throw new Error("Could not reach the form service. Try again in a bit.");
+  }
+  // An error page (e.g. HTML 429) isn't JSON; report it as what it is.
+  const result = await res.json().catch(() => null);
+  if (!res.ok || !result?.success) {
+    throw new Error(result?.message || `The form service returned an error (${res.status}). Try again in a bit.`);
+  }
+}
+
 function ContactForm() {
   const [status, setStatus] = useState<"idle" | "sending" | "sent" | "error">("idle");
   const [errorMessage, setErrorMessage] = useState("");
+  // State updates are async, so a fast double-click could start two sends
+  // before the button re-renders as disabled. A ref blocks it synchronously.
+  const inFlight = useRef(false);
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    if (inFlight.current) return;
+    inFlight.current = true;
+    setStatus("sending");
     const form = e.currentTarget;
     const data = new FormData(form);
-
-    // Prefer sending through the backend's Gmail integration; until that's
-    // configured, keep using Web3Forms so the form never goes dark.
-    if ((await getIntegrations()).gmail?.configured) {
-      setStatus("sending");
-      try {
-        await sendContact({
-          name: String(data.get("name") ?? ""),
-          email: String(data.get("email") ?? ""),
-          message: String(data.get("message") ?? ""),
-          website: String(data.get("website") ?? ""),
-        });
-        setStatus("sent");
-        form.reset();
-      } catch (err) {
-        setStatus("error");
-        setErrorMessage(err instanceof ApiError ? err.message : "Something went wrong sending that.");
-      }
-      return;
-    }
-
-    if (!WEB3FORMS_ACCESS_KEY) {
+    const fail = (message: string) => {
       setStatus("error");
-      setErrorMessage("Contact form isn't configured yet (missing access key).");
-      return;
-    }
-    setStatus("sending");
-    data.delete("website");
-    data.append("access_key", WEB3FORMS_ACCESS_KEY);
-    data.append("subject", "New message from the AgentBridge site");
+      setErrorMessage(message);
+    };
+    const done = () => {
+      setStatus("sent");
+      form.reset();
+    };
+
     try {
-      const res = await fetch("https://api.web3forms.com/submit", {
-        method: "POST",
-        headers: { Accept: "application/json" },
-        body: data,
-      });
-      const result = await res.json();
-      if (result.success) {
-        setStatus("sent");
-        form.reset();
-      } else {
-        setStatus("error");
-        setErrorMessage(result.message || "Something went wrong sending that.");
+      // Honeypot filled in: a bot. Pretend it worked without sending anything.
+      if (String(data.get("website") ?? "").trim()) return done();
+
+      // Prefer the backend's Gmail integration. If it isn't configured -- or
+      // the backend itself is down or erroring -- fall back to Web3Forms so a
+      // visitor's message still gets through. (Errors about the input, or
+      // rate limiting, are shown instead: retrying elsewhere wouldn't help.)
+      if ((await getIntegrations()).gmail?.configured) {
+        try {
+          await sendContact({
+            name: String(data.get("name") ?? ""),
+            email: String(data.get("email") ?? ""),
+            message: String(data.get("message") ?? ""),
+            website: "",
+          });
+          return done();
+        } catch (err) {
+          if (!(err instanceof ApiError) || !err.isServerFailure) {
+            return fail(err instanceof ApiError ? err.message : "Something went wrong sending that.");
+          }
+          console.warn("Gmail contact send failed; falling back to Web3Forms.", err);
+        }
       }
-    } catch {
-      setStatus("error");
-      setErrorMessage("Could not reach the form service. Try again in a bit.");
+
+      await sendViaWeb3Forms(data);
+      done();
+    } catch (err) {
+      fail(err instanceof Error ? err.message : "Something went wrong sending that.");
+    } finally {
+      inFlight.current = false;
     }
   }
 
@@ -399,9 +422,28 @@ function DesignShowcase() {
   );
 }
 
+// Wraps each integration-driven section: if one throws while rendering
+// (say, the backend's data changed shape), that section disappears instead
+// of React unmounting the entire page.
+class OptionalSection extends Component<{ name: string; children: ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  componentDidCatch(error: unknown) {
+    console.warn(`The ${this.props.name} section failed to render and was hidden.`, error);
+  }
+
+  render() {
+    return this.state.failed ? null : this.props.children;
+  }
+}
+
 const compact = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 });
 
-function SectionHeading({ eyebrow, title, aside }: { eyebrow: string; title: string; aside?: React.ReactNode }) {
+function SectionHeading({ eyebrow, title, aside }: { eyebrow: string; title: string; aside?: ReactNode }) {
   return (
     <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-10">
       <div>
@@ -1020,12 +1062,6 @@ export default function App() {
         </div>
       </section>
 
-      <GitHubSection />
-
-      <DesignShowcase />
-
-      <BookingSection />
-
       {/* Contact */}
       <section id="contact" className="border-t" style={{ borderColor: "var(--color-border)" }}>
         <div className="max-w-6xl mx-auto px-6 md:px-12 py-20 md:py-28">
@@ -1080,12 +1116,29 @@ export default function App() {
               >
                 <span style={{ color: "var(--color-accent)" }}>⚑</span> Report an issue
               </a>
-              <ResumeLink />
-              <BookingLink />
+              <OptionalSection name="ResumeLink">
+                <ResumeLink />
+              </OptionalSection>
+              <OptionalSection name="BookingLink">
+                <BookingLink />
+              </OptionalSection>
             </div>
           </div>
         </div>
       </section>
+
+      {/* Integration-driven sections. They appear only once the backend
+          reports them configured, so they sit below Contact: loading late
+          can't push the contact form down while someone is using it. */}
+      <OptionalSection name="Booking">
+        <BookingSection />
+      </OptionalSection>
+      <OptionalSection name="GitHub">
+        <GitHubSection />
+      </OptionalSection>
+      <OptionalSection name="Design">
+        <DesignShowcase />
+      </OptionalSection>
 
       {/* Footer */}
       <footer className="border-t px-6 md:px-12 py-8" style={{ borderColor: "var(--color-border)" }}>

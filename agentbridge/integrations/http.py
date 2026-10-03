@@ -8,6 +8,7 @@ copy of urllib boilerplate.
 
 import http.client
 import json
+import math
 import time
 import urllib.error
 import urllib.parse
@@ -107,9 +108,12 @@ def _backoff(attempt: int, retry_after: str | None) -> float:
     if retry_after:
         try:
             # Honor the server's hint, but never stall a web request for long.
-            return min(float(retry_after), 5.0)
+            # Clamped both ways: a negative or NaN hint would crash sleep().
+            hint = float(retry_after)
+            if math.isfinite(hint):
+                return min(max(hint, 0.0), 5.0)
         except ValueError:
-            pass
+            pass  # an HTTP-date rather than seconds; use our own schedule
     return 0.5 * (2 ** (attempt - 1))
 
 
